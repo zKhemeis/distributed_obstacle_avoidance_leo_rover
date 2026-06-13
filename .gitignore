@@ -6,3 +6,7 @@ log/
 # Colcon metadata
 .colcon/
 .colcon_install_cache/
+
+*.bag
+*.db3
+.vscode/
