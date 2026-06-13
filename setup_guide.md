@@ -164,21 +164,5 @@ Open a second terminal into the running container:
 docker exec -it leo_dev bash
 ```
 
----
 
-# 8. Pull New Changes
-
-Before starting new work:
-
-```powershell
-git pull
-```
-
-After making changes:
-
-```powershell
-git add .
-git commit -m "Describe your changes"
-git push
-```
 
