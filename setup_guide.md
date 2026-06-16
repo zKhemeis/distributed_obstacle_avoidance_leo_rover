@@ -14,9 +14,7 @@ The Docker setup ensures that all team members use the same environment independ
 
 Install Docker Desktop:
 
-```text
 https://www.docker.com/products/docker-desktop/
-```
 
 During installation, enable WSL2 support if requested.
 
@@ -51,7 +49,34 @@ docker run -it --name leo_dev -v ${PWD}:/root/leo_ws leo_humble_gazebo
 
 ---
 
-# 4. Build the ROS Workspace
+# 4. Clone Leo Rover Dependencies
+
+Inside the container:
+
+```bash
+cd /root/leo_ws/src
+
+git clone -b humble https://github.com/LeoRover/leo_common-ros2.git
+
+git clone -b humble https://github.com/LeoRover/leo_simulator-ros2.git
+```
+
+Verify:
+
+```bash
+ls
+```
+
+Expected:
+
+```text
+leo_common-ros2
+leo_simulator-ros2
+```
+
+---
+
+# 5. Build the ROS Workspace
 
 Inside the container:
 
@@ -90,7 +115,7 @@ leo_teleop
 
 ---
 
-# 5. Launch Gazebo
+# 6. Launch Gazebo
 
 Inside the container:
 
@@ -106,7 +131,7 @@ ros2 launch leo_gz_bringup leo_gz.launch.py
 
 ---
 
-# 6. Move the Robot
+# 7. Move the Robot
 
 Open a second terminal and enter the running container:
 
@@ -150,7 +175,7 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0
 
 ---
 
-# 7. Reopen the Container Later
+# 8. Reopen the Container Later
 
 Restart the container:
 
@@ -163,6 +188,4 @@ Open a second terminal into the running container:
 ```powershell
 docker exec -it leo_dev bash
 ```
-
-
 
