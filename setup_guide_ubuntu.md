@@ -234,9 +234,85 @@ leo_random_walk_cpp
 leo_simulator-ros2
 ```
 
+Note:
+
+```text
+src/leo_common-ros2
+src/leo_simulator-ros2
+```
+
+are separate Git repositories nested inside the main project repository.
+
+Any modifications inside these folders must be committed and pushed from within those repositories.
+
 ---
 
-# 8. Build the ROS Workspace
+# 8. Optional: Modifying Leo Rover Dependencies
+
+The folders
+
+```text
+src/leo_common-ros2
+src/leo_simulator-ros2
+```
+
+are independent Git repositories inside the main project repository.
+
+Project structure:
+
+```text
+distributed_obstacle_avoidance_leo_rover
+├── src/leo_common-ros2
+├── src/leo_random_walk_cpp
+└── src/leo_simulator-ros2
+```
+
+This means:
+
+* Commits inside `src/leo_common-ros2` are separate from the main project repository.
+* Commits inside `src/leo_simulator-ros2` are separate from the main project repository.
+* Running `git push` in the main project repository will not push changes made inside these folders.
+
+If you only want to run the simulation, no additional steps are required.
+
+If you want to modify these repositories and share your changes with the team, use the team's forks or your own forks:
+
+```text
+https://github.com/<your-account>/leo_common-ros2
+https://github.com/<your-account>/leo_simulator-ros2
+```
+
+Then change the remotes.
+
+For `leo_common-ros2`:
+
+```bash
+cd /root/leo_ws/src/leo_common-ros2
+git remote set-url origin https://github.com/<your-account>/leo_common-ros2.git
+git remote -v
+```
+
+For `leo_simulator-ros2`:
+
+```bash
+cd /root/leo_ws/src/leo_simulator-ros2
+git remote set-url origin https://github.com/<your-account>/leo_simulator-ros2.git
+git remote -v
+```
+
+After this, commits can be pushed normally from inside each repository:
+
+```bash
+git add .
+git commit -m "Description of the changes"
+git push
+```
+
+GitHub may offer to create a Pull Request to the official Leo Rover repositories. This is optional and can be ignored unless you want to contribute your changes back to the Leo Rover project.
+
+---
+
+# 9. Build the ROS Workspace
 
 Inside the container:
 
@@ -286,7 +362,7 @@ leo_teleop
 
 ---
 
-# 9. Launch Gazebo
+# 10. Launch Gazebo
 
 Inside the container:
 
@@ -303,7 +379,7 @@ If everything works, Gazebo should open on the Ubuntu desktop.
 
 ---
 
-# 10. Move the Robot
+# 11. Move the Robot
 
 Open a second terminal and enter the running container:
 
@@ -346,7 +422,7 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0
 
 ---
 
-# 11. Reopen the Container Later
+# 12. Reopen the Container Later
 
 Restart the existing container:
 
@@ -371,7 +447,7 @@ source install/setup.bash
 
 ---
 
-# 12. Common Problems
+# 13. Common Problems
 
 ## Problem: permission denied while trying to connect to the Docker daemon socket
 
@@ -465,7 +541,21 @@ ros2 pkg list | grep leo
 
 ---
 
-# 13. Development Workflow
+## Problem: Git says permission denied or dubious ownership
+
+This can happen because Docker runs as root and the project folder is mounted into the container.
+
+On Ubuntu host, run:
+
+```bash
+sudo chown -R $USER:$USER ~/Desktop/distributed_obstacle_avoidance_leo_rover
+```
+
+If your project is stored somewhere else, replace the path.
+
+---
+
+# 14. Development Workflow
 
 Whenever you modify ROS packages:
 
@@ -484,4 +574,12 @@ Host Repository  <----->  Docker Workspace (/root/leo_ws)
 ```
 
 any file changes made inside Docker immediately appear in the local repository, and any changes made locally immediately appear inside Docker.
+
+Remember:
+
+```text
+Changes in main project files      -> commit from main project repository
+Changes in leo_common-ros2         -> commit from src/leo_common-ros2
+Changes in leo_simulator-ros2      -> commit from src/leo_simulator-ros2
+```
 
