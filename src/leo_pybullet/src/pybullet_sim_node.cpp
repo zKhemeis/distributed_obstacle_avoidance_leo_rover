@@ -9,6 +9,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 
 #include "btBulletDynamicsCommon.h"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 class LeoPybulletSimNode : public rclcpp::Node
 {
@@ -22,6 +23,10 @@ public:
     );
 
     scan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
+    marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/pybullet_markers",
+      10
+    );
 
     initBulletWorld();
 
@@ -158,6 +163,8 @@ private:
 
     if (step_count_ % scan_publish_every_n_steps_ == 0) {
       publishRaycastScan();
+      publishMarkers();
+      
     }
 
     if (step_count_ % static_cast<int>(physics_rate_) == 0) {
@@ -274,9 +281,152 @@ private:
       pos.x(), pos.y(), yaw, sim_time_, rtf
     );
   }
+  void publishMarkers()
+  {
+    visualization_msgs::msg::MarkerArray markers;
 
+    btTransform robot_tf;
+    robot_body_->getMotionState()->getWorldTransform(robot_tf);
+
+    const btVector3 robot_pos = robot_tf.getOrigin();
+    const double yaw = getYaw(robot_tf);
+
+    const auto makeQuatFromYaw = [](double yaw_angle) {
+      geometry_msgs::msg::Quaternion q;
+      q.x = 0.0;
+      q.y = 0.0;
+      q.z = std::sin(yaw_angle / 2.0);
+      q.w = std::cos(yaw_angle / 2.0);
+      return q;
+    };
+
+    const auto transformPoint = [&](double lx, double ly, double lz) {
+      geometry_msgs::msg::Point p;
+      p.x = robot_pos.x() + std::cos(yaw) * lx - std::sin(yaw) * ly;
+      p.y = robot_pos.y() + std::sin(yaw) * lx + std::cos(yaw) * ly;
+      p.z = robot_pos.z() + lz;
+      return p;
+    };
+
+    // Chassis
+    visualization_msgs::msg::Marker chassis;
+    chassis.header.frame_id = "map";
+    chassis.header.stamp = this->now();
+    chassis.ns = "leo_robot";
+    chassis.id = 0;
+    chassis.type = visualization_msgs::msg::Marker::CUBE;
+    chassis.action = visualization_msgs::msg::Marker::ADD;
+    chassis.pose.position = transformPoint(0.0, 0.0, 0.0);
+    chassis.pose.orientation = makeQuatFromYaw(yaw);
+    chassis.scale.x = 0.42;
+    chassis.scale.y = 0.28;
+    chassis.scale.z = 0.16;
+    chassis.color.r = 0.1;
+    chassis.color.g = 0.4;
+    chassis.color.b = 1.0;
+    chassis.color.a = 1.0;
+    markers.markers.push_back(chassis);
+
+    // LiDAR position from URDF scan_joint xyz="0.10 0 0.08"
+    visualization_msgs::msg::Marker lidar;
+    lidar.header.frame_id = "map";
+    lidar.header.stamp = this->now();
+    lidar.ns = "leo_robot";
+    lidar.id = 1;
+    lidar.type = visualization_msgs::msg::Marker::SPHERE;
+    lidar.action = visualization_msgs::msg::Marker::ADD;
+    lidar.pose.position = transformPoint(0.10, 0.0, 0.08);
+    lidar.pose.orientation.w = 1.0;
+    lidar.scale.x = 0.06;
+    lidar.scale.y = 0.06;
+    lidar.scale.z = 0.04;
+    lidar.color.r = 0.0;
+    lidar.color.g = 1.0;
+    lidar.color.b = 0.0;
+    lidar.color.a = 1.0;
+    markers.markers.push_back(lidar);
+
+  // Wheel positions, approximated from URDF:
+  // rocker joints at y= +/-0.14167, wheel offsets x= +/-0.15256, y=-0.08214.
+  // This gives approximate wheel y positions around +/-0.224.
+    struct WheelVis {
+      double x;
+      double y;
+      int id;
+    };
+
+    std::vector<WheelVis> wheels = {
+      {-0.15256,  0.224, 2},  // FL
+      { 0.15256,  0.224, 3},  // RL
+      { 0.15256, -0.224, 4},  // FR
+      {-0.15256, -0.224, 5},  // RR
+    };
+
+    for (const auto & wheel : wheels) {
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->now();
+      marker.ns = "leo_robot";
+      marker.id = wheel.id;
+      marker.type = visualization_msgs::msg::Marker::CYLINDER;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      marker.pose.position = transformPoint(wheel.x, wheel.y, -0.10);
+
+    // Simple wheel cylinder orientation.
+    // In RViz a cylinder is along z by default. This rotates it approximately to wheel axis.
+      marker.pose.orientation.x = 0.7071;
+      marker.pose.orientation.y = 0.0;
+      marker.pose.orientation.z = 0.0;
+      marker.pose.orientation.w = 0.7071;
+
+      marker.scale.x = 0.125;  // diameter
+      marker.scale.y = 0.125;  // diameter
+      marker.scale.z = 0.07;   // width
+      marker.color.r = 0.02;
+      marker.color.g = 0.02;
+      marker.color.b = 0.02;
+      marker.color.a = 1.0;
+      markers.markers.push_back(marker);
+    }
+
+    // Obstacles
+    std::vector<std::tuple<double, double, double, double, double>> boxes = {
+      {2.0, 0.0, 0.25, 0.5, 0.5},
+      {3.0, 1.0, 0.25, 0.6, 0.6},
+      {4.0, -1.0, 0.25, 0.6, 0.6},
+      {5.0, 0.0, 0.25, 0.8, 0.8},
+    };
+
+    int id = 100;
+    for (const auto & box : boxes) {
+      auto [x, y, z, sx, sy] = box;
+
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->now();
+      marker.ns = "obstacles";
+      marker.id = id++;
+      marker.type = visualization_msgs::msg::Marker::CUBE;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      marker.pose.position.x = x;
+      marker.pose.position.y = y;
+      marker.pose.position.z = z;
+      marker.pose.orientation.w = 1.0;
+      marker.scale.x = sx;
+      marker.scale.y = sy;
+      marker.scale.z = 0.5;
+      marker.color.r = 1.0;
+      marker.color.g = 0.2;
+      marker.color.b = 0.1;
+      marker.color.a = 1.0;
+      markers.markers.push_back(marker);
+    }
+
+    marker_pub_->publish(markers);
+  }
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   btBroadphaseInterface * broadphase_ = nullptr;
