@@ -2,11 +2,11 @@
 
 This project uses:
 
-* ROS 2 Humble
-* Gazebo / Ignition Gazebo
-* Docker
+- ROS 2 Humble
+- Gazebo / Ignition Gazebo
+- Docker
 
-The Docker setup ensures that all team members use the same environment independent of their host operating system.
+All required Leo Rover ROS 2 packages are already included inside this repository under `src/`.
 
 ---
 
@@ -45,7 +45,6 @@ Install Docker:
 
 ```bash
 sudo apt update
-
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 
@@ -140,39 +139,21 @@ Run this command only once.
 
 After the container has been created, do not run this command again.
 
-Use:
+Use this command later to reopen the existing container:
 
 ```bash
 docker start -ai leo_dev
 ```
 
-to reopen the existing container.
-
-Explanation of the important options:
-
-```text
---env DISPLAY=$DISPLAY
-```
-
-Forwards the display variable from Ubuntu to the container.
-
-```text
---volume /tmp/.X11-unix:/tmp/.X11-unix:rw
-```
-
-Allows graphical applications inside the container to open windows on Ubuntu.
+The important mount is:
 
 ```text
 --volume ${PWD}:/root/leo_ws
 ```
 
-Mounts the current repository folder into the container at:
+This connects the local repository to the Docker workspace.
 
-```text
-/root/leo_ws
-```
-
-Changes made inside Docker immediately appear in the local repository and vice versa.
+Changes made inside Docker immediately appear in the local repository, and changes made locally immediately appear inside Docker.
 
 ---
 
@@ -184,49 +165,22 @@ Inside the container:
 ls /root/leo_ws
 ```
 
-Expected:
+Expected files/folders include:
 
 ```text
 Dockerfile
 setup_guide_ubuntu.md
+setup_guide_windows.md
 src
 ```
 
-Check the workspace source folder:
+Check the source folder:
 
 ```bash
 ls /root/leo_ws/src
 ```
 
-Expected:
-
-```text
-leo_random_walk_cpp
-```
-
----
-
-# 7. Clone Leo Rover Dependencies
-
-Only execute this step once.
-
-Inside the container:
-
-```bash
-cd /root/leo_ws/src
-
-git clone -b humble https://github.com/LeoRover/leo_common-ros2.git
-
-git clone -b humble https://github.com/LeoRover/leo_simulator-ros2.git
-```
-
-Verify:
-
-```bash
-ls
-```
-
-Expected:
+Expected packages include:
 
 ```text
 leo_common-ros2
@@ -234,85 +188,14 @@ leo_random_walk_cpp
 leo_simulator-ros2
 ```
 
-Note:
+Important:
 
-```text
-src/leo_common-ros2
-src/leo_simulator-ros2
-```
-
-are separate Git repositories nested inside the main project repository.
-
-Any modifications inside these folders must be committed and pushed from within those repositories.
+The Leo Rover packages are already included in this repository.  
+Do not clone `leo_common-ros2` or `leo_simulator-ros2` manually.
 
 ---
 
-# 8. Optional: Modifying Leo Rover Dependencies
-
-The folders
-
-```text
-src/leo_common-ros2
-src/leo_simulator-ros2
-```
-
-are independent Git repositories inside the main project repository.
-
-Project structure:
-
-```text
-distributed_obstacle_avoidance_leo_rover
-├── src/leo_common-ros2
-├── src/leo_random_walk_cpp
-└── src/leo_simulator-ros2
-```
-
-This means:
-
-* Commits inside `src/leo_common-ros2` are separate from the main project repository.
-* Commits inside `src/leo_simulator-ros2` are separate from the main project repository.
-* Running `git push` in the main project repository will not push changes made inside these folders.
-
-If you only want to run the simulation, no additional steps are required.
-
-If you want to modify these repositories and share your changes with the team, use the team's forks or your own forks:
-
-```text
-https://github.com/<your-account>/leo_common-ros2
-https://github.com/<your-account>/leo_simulator-ros2
-```
-
-Then change the remotes.
-
-For `leo_common-ros2`:
-
-```bash
-cd /root/leo_ws/src/leo_common-ros2
-git remote set-url origin https://github.com/<your-account>/leo_common-ros2.git
-git remote -v
-```
-
-For `leo_simulator-ros2`:
-
-```bash
-cd /root/leo_ws/src/leo_simulator-ros2
-git remote set-url origin https://github.com/<your-account>/leo_simulator-ros2.git
-git remote -v
-```
-
-After this, commits can be pushed normally from inside each repository:
-
-```bash
-git add .
-git commit -m "Description of the changes"
-git push
-```
-
-GitHub may offer to create a Pull Request to the official Leo Rover repositories. This is optional and can be ignored unless you want to contribute your changes back to the Leo Rover project.
-
----
-
-# 9. Build the ROS Workspace
+# 7. Build the ROS Workspace
 
 Inside the container:
 
@@ -362,7 +245,7 @@ leo_teleop
 
 ---
 
-# 10. Launch Gazebo
+# 8. Launch Gazebo With GUI
 
 Inside the container:
 
@@ -379,7 +262,24 @@ If everything works, Gazebo should open on the Ubuntu desktop.
 
 ---
 
-# 11. Move the Robot
+# 9. Launch Gazebo Headless
+
+Headless mode runs the simulation without opening the Gazebo GUI.
+
+This is useful for better performance:
+
+```bash
+cd /root/leo_ws
+
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 launch leo_gz_bringup leo_gz_headless.launch.py
+```
+
+---
+
+# 10. Move the Robot Manually
 
 Open a second terminal and enter the running container:
 
@@ -422,21 +322,42 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0
 
 ---
 
-# 12. Reopen the Container Later
+# 11. Run the Random Walk Node
 
-Restart the existing container:
-
-```bash
-docker start -ai leo_dev
-```
-
-Open a second terminal into the running container:
+Open a second terminal and enter the running container:
 
 ```bash
 docker exec -it leo_dev bash
 ```
 
-Source the workspace again:
+Inside the container:
+
+```bash
+cd /root/leo_ws
+
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run leo_random_walk_cpp random_walk_node
+```
+
+---
+
+# 12. Reopen the Container Later
+
+Terminal 1:
+
+```bash
+docker start -ai leo_dev
+```
+
+Terminal 2:
+
+```bash
+docker exec -it leo_dev bash
+```
+
+Inside the container:
 
 ```bash
 cd /root/leo_ws
@@ -447,7 +368,40 @@ source install/setup.bash
 
 ---
 
-# 13. Common Problems
+# 13. Development Workflow
+
+All packages are normal folders inside this repository.
+
+When changing ROS code, rebuild inside Docker:
+
+```bash
+cd /root/leo_ws
+
+colcon build --symlink-install
+
+source install/setup.bash
+```
+
+Then commit from the main project repository on the host machine:
+
+```bash
+git status
+git add .
+git commit -m "Describe the change"
+git push
+```
+
+Branch usage:
+
+```text
+main                 stable base
+gazebo_simulation    Gazebo-specific work
+pybullet_simulation  PyBullet-specific work
+```
+
+---
+
+# 14. Common Problems
 
 ## Problem: permission denied while trying to connect to the Docker daemon socket
 
@@ -478,7 +432,7 @@ Start it:
 docker start -ai leo_dev
 ```
 
-Do not create another container.
+Do not create another container with the same name.
 
 ---
 
@@ -545,41 +499,10 @@ ros2 pkg list | grep leo
 
 This can happen because Docker runs as root and the project folder is mounted into the container.
 
-On Ubuntu host, run:
+On the Ubuntu host, run:
 
 ```bash
 sudo chown -R $USER:$USER ~/Desktop/distributed_obstacle_avoidance_leo_rover
 ```
 
 If your project is stored somewhere else, replace the path.
-
----
-
-# 14. Development Workflow
-
-Whenever you modify ROS packages:
-
-```bash
-cd /root/leo_ws
-
-colcon build --symlink-install
-
-source install/setup.bash
-```
-
-Because the repository is mounted into Docker:
-
-```text
-Host Repository  <----->  Docker Workspace (/root/leo_ws)
-```
-
-any file changes made inside Docker immediately appear in the local repository, and any changes made locally immediately appear inside Docker.
-
-Remember:
-
-```text
-Changes in main project files      -> commit from main project repository
-Changes in leo_common-ros2         -> commit from src/leo_common-ros2
-Changes in leo_simulator-ros2      -> commit from src/leo_simulator-ros2
-```
-
