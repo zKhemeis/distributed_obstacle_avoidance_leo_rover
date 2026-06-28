@@ -91,6 +91,7 @@ def spawn_robot(context: LaunchContext, namespace: LaunchConfiguration):
             # Camera disabled for LiDAR-only simulation
             #robot_ns
            # + "/camera/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo",
+            robot_ns + "/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan", # new for lidar
             robot_ns + "/joint_states@sensor_msgs/msg/JointState[ignition.msgs.Model",
         ],
         parameters=[

@@ -164,7 +164,31 @@
 
     <link name="${link_prefix}camera_frame"/>
     <link name="${link_prefix}camera_optical_frame"/>
+    <!-- new link for the Lidar -->
     <link name="${link_prefix}imu_frame"/>
+        <link name="${link_prefix}base_scan">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="0.0508" length="0.055"/>
+        </geometry>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="0.0508" length="0.055"/>
+        </geometry>
+      </collision>
+
+      <inertial>
+        <mass value="0.114"/>
+        <origin xyz="0 0 0"/>
+        <inertia ixx="0.001" ixy="0.0" ixz="0.0"
+                 iyy="0.001" iyz="0.0"
+                 izz="0.001"/>
+      </inertial>
+    </link>
 
     <!-- JOINTS -->
 
@@ -282,6 +306,12 @@
       <origin xyz="${imu_translation}" rpy="0 0 0"/>
       <parent link="${link_prefix}base_link"/>
       <child link="${link_prefix}imu_frame"/>
+    <!-- new lidar joint -->
+    </joint>
+        <joint name="${joint_prefix}scan_joint" type="fixed">
+      <origin xyz="0.10 0 0.08" rpy="0 0 0"/>
+      <parent link="${link_prefix}base_link"/>
+      <child link="${link_prefix}base_scan"/>
     </joint>
 
   </xacro:macro>
@@ -454,7 +484,7 @@
       </collision>
     </gazebo>
     <!-- camera disabled for LiDAR-only simulation TODO remove to reuse the cam -->
-    <!-- camera -->
+    <!-- camera 
     <gazebo reference="${link_prefix}camera_frame">
       <sensor name="camera" type="camera">
           <camera name="leo_camera">
@@ -490,7 +520,40 @@
           <gz_frame_id>${link_prefix}camera_optical_frame</gz_frame_id>
       </sensor>
     </gazebo>
-    <!-- -->
+    -->
+    <!-- new 2D LiDAR based on TurtleBot3 LDS settings -->
+    <gazebo reference="${link_prefix}base_scan">
+      <sensor name="hls_lfcd_lds" type="gpu_lidar">
+        <always_on>1</always_on>
+        <visualize>true</visualize>
+        <update_rate>5</update_rate>
+        <topic>${link_prefix}scan</topic>
+
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>6.28</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.12</min>
+            <max>3.5</max>
+            <resolution>0.015</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </lidar>
+
+        <ignition_frame_id>${link_prefix}base_scan</ignition_frame_id>
+        <gz_frame_id>${link_prefix}base_scan</gz_frame_id>
+      </sensor>
+    </gazebo>
     <!-- rocker differential -->
     <gazebo>
       <plugin name="leo_gz::DifferentialSystem" filename="libleo_gz_differential_plugin.so">
