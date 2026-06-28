@@ -134,19 +134,6 @@ private:
         scan.ranges[i] = std::numeric_limits<float>::infinity();
       }
     }
-    float min_range = std::numeric_limits<float>::infinity();
-
-    for (const auto & r : scan.ranges) {
-      if (std::isfinite(r) && r < min_range) {
-        min_range = r;
-      }
-    }
-
-    if (std::isfinite(min_range)) {
-      RCLCPP_INFO(this->get_logger(), "Closest LiDAR hit: %.3f m", min_range);
-    } else {
-      RCLCPP_INFO(this->get_logger(), "No LiDAR hit");
-    }
     scan_pub_->publish(scan);
   }
 
