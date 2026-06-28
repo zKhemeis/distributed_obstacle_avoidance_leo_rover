@@ -13,6 +13,7 @@ find_package(nav_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 add_executable(pybullet_sim_node src/pybullet_sim_node.cpp)
+add_executable(scan_debug_node src/scan_debug_node.cpp)
 
 ament_target_dependencies(pybullet_sim_node
   rclcpp
@@ -21,9 +22,13 @@ ament_target_dependencies(pybullet_sim_node
   nav_msgs
   tf2_ros
 )
-
+ament_target_dependencies(scan_debug_node
+  rclcpp
+  sensor_msgs
+)
 install(TARGETS
   pybullet_sim_node
+  scan_debug_node
   DESTINATION lib/${PROJECT_NAME}
 )
 
