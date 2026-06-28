@@ -2,22 +2,7 @@
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
+# in the Software without restriction.
 
 import os
 
@@ -27,20 +12,19 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
-    # Setup project paths
     pkg_ros_gz_sim = get_package_share_directory("ros_gz_sim")
     pkg_project_gazebo = get_package_share_directory("leo_gz_bringup")
-    pkg_project_worlds = get_package_share_directory("leo_gz_worlds")
 
-    sim_world = DeclareLaunchArgument(
-        "sim_world",
-        default_value=os.path.join(pkg_project_worlds, "worlds", "leo_empty.sdf"),
-        description="Path to the Gazebo world file",
+    world_arg = DeclareLaunchArgument(
+        "world",
+        default_value="leo_empty.sdf",
+        description="Gazebo world file from leo_gz_worlds/worlds",
     )
 
     robot_ns = DeclareLaunchArgument(
@@ -49,12 +33,21 @@ def generate_launch_description():
         description="Robot namespace",
     )
 
-    # Setup to launch the simulator and Gazebo world
+    world = LaunchConfiguration("world")
+
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_ros_gz_sim, "launch", "gz_sim.launch.py")
         ),
-        launch_arguments={"gz_args": LaunchConfiguration("sim_world")}.items(),
+        launch_arguments={
+            "gz_args": PathJoinSubstitution(
+                [
+                    FindPackageShare("leo_gz_worlds"),
+                    "worlds",
+                    world,
+                ]
+            )
+        }.items(),
     )
 
     spawn_robot = IncludeLaunchDescription(
@@ -64,8 +57,7 @@ def generate_launch_description():
         launch_arguments={"robot_ns": LaunchConfiguration("robot_ns")}.items(),
     )
 
-    # Bridge ROS topics and Gazebo messages for establishing communication
-    topic_bridge = Node(
+    clock_bridge = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
         name="clock_bridge",
@@ -82,10 +74,10 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            sim_world,
+            world_arg,
             robot_ns,
             gz_sim,
             spawn_robot,
-            topic_bridge,
+            clock_bridge,
         ]
     )

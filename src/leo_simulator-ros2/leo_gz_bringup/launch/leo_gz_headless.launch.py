@@ -1,38 +1,53 @@
 import os
 
 from ament_index_python.packages import get_package_share_directory
-
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
-
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 
 
-def launch_setup(context, *args, **kwargs):
-    pkg_ros_gz_sim = get_package_share_directory("ros_gz_sim")
-    pkg_project_gazebo = get_package_share_directory("leo_gz_bringup")
+def generate_launch_description():
+    world_arg = DeclareLaunchArgument(
+        "world",
+        default_value="leo_empty.sdf",
+        description="Gazebo world file from leo_gz_worlds/worlds",
+    )
 
-    sim_world = LaunchConfiguration("sim_world").perform(context)
-    robot_ns = LaunchConfiguration("robot_ns").perform(context)
+    world = LaunchConfiguration("world")
 
     gz_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_ros_gz_sim, "launch", "gz_sim.launch.py")
+            os.path.join(
+                get_package_share_directory("ros_gz_sim"),
+                "launch",
+                "gz_sim.launch.py",
+            )
         ),
         launch_arguments={
-            "gz_args": f"-s -r {sim_world}"
+            "gz_args": [
+                "-r -s ",
+                PathJoinSubstitution(
+                    [
+                        FindPackageShare("leo_gz_worlds"),
+                        "worlds",
+                        world,
+                    ]
+                ),
+            ]
         }.items(),
     )
 
     spawn_robot = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(pkg_project_gazebo, "launch", "spawn_robot.launch.py")
-        ),
-        launch_arguments={
-            "robot_ns": robot_ns
-        }.items(),
+            os.path.join(
+                get_package_share_directory("leo_gz_bringup"),
+                "launch",
+                "spawn_robot.launch.py",
+            )
+        )
     )
 
     clock_bridge = Node(
@@ -45,32 +60,11 @@ def launch_setup(context, *args, **kwargs):
         output="screen",
     )
 
-    return [
-        gz_sim,
-        spawn_robot,
-        clock_bridge,
-    ]
-
-
-def generate_launch_description():
-    pkg_project_worlds = get_package_share_directory("leo_gz_worlds")
-
-    return LaunchDescription([
-        DeclareLaunchArgument(
-            "sim_world",
-            default_value=os.path.join(
-                pkg_project_worlds,
-                "worlds",
-                "leo_empty.sdf"
-            ),
-            description="Path to the Gazebo world file",
-        ),
-
-        DeclareLaunchArgument(
-            "robot_ns",
-            default_value="",
-            description="Robot namespace",
-        ),
-
-        OpaqueFunction(function=launch_setup),
-    ])
+    return LaunchDescription(
+        [
+            world_arg,
+            gz_sim,
+            spawn_robot,
+            clock_bridge,
+        ]
+    )
