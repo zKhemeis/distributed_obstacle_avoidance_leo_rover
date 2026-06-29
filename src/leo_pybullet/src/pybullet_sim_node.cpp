@@ -244,8 +244,8 @@ private:
     const double right_linear =
       linear_velocity_ + angular_velocity_ * track_width_ / 2.0;
 
-    const double left_wheel_speed = left_linear / wheel_radius_;
-    const double right_wheel_speed = right_linear / wheel_radius_;
+    const double left_wheel_speed = -left_linear / wheel_radius_;
+    const double right_wheel_speed = -right_linear / wheel_radius_;
 
     for (auto & wheel : wheels_) {
       const double target_speed =
