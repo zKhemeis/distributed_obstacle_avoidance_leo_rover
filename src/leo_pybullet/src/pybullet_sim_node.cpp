@@ -11,6 +11,8 @@
 
 #include "btBulletDynamicsCommon.h"
 #include "nav_msgs/msg/odometry.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "tf2_ros/transform_broadcaster.h"
 
 struct Wheel
 {
@@ -35,6 +37,7 @@ public:
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
       "/pybullet_markers", 10
     );
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     initBulletWorld();
 
@@ -468,6 +471,21 @@ private:
     odom.twist.twist.angular.z = ang_vel.z();
 
     odom_pub_->publish(odom);
+    geometry_msgs::msg::TransformStamped tf_msg;
+    tf_msg.header.stamp = odom.header.stamp;
+    tf_msg.header.frame_id = "odom";
+    tf_msg.child_frame_id = "base_link";
+
+    tf_msg.transform.translation.x = pos.x();
+    tf_msg.transform.translation.y = pos.y();
+    tf_msg.transform.translation.z = pos.z();
+
+    tf_msg.transform.rotation.x = q.x();
+    tf_msg.transform.rotation.y = q.y();
+    tf_msg.transform.rotation.z = q.z();
+    tf_msg.transform.rotation.w = q.w();
+
+    tf_broadcaster_->sendTransform(tf_msg);
   }
   void printStatus()
   {
@@ -493,6 +511,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   btBroadphaseInterface * broadphase_ = nullptr;
