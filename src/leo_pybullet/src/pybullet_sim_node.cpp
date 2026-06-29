@@ -3,6 +3,8 @@
 #include <limits>
 #include <memory>
 #include <vector>
+#include "yaml-cpp/yaml.h"
+#include <string>
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
@@ -19,6 +21,17 @@ struct Wheel
   btRigidBody * body = nullptr;
   btHingeConstraint * hinge = nullptr;
   bool left_side = true;
+};
+
+struct BoxObstacle
+{
+  std::string name;
+  double x;
+  double y;
+  double z;
+  double size_x;
+  double size_y;
+  double size_z;
 };
 
 class LeoPybulletSimNode : public rclcpp::Node
@@ -38,7 +51,8 @@ public:
       "/pybullet_markers", 10
     );
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-
+    
+    loadWorldFromYaml("/root/leo_ws/src/leo_pybullet/worlds/boxes_world.yaml");
     initBulletWorld();
 
     timer_ = this->create_wall_timer(
@@ -107,7 +121,38 @@ private:
 
     return body;
   }
+  void loadWorldFromYaml(const std::string & world_file)
+  {
+    obstacles_.clear();
 
+    try {
+      YAML::Node config = YAML::LoadFile(world_file);
+
+      if (!config["obstacles"]) {
+        RCLCPP_WARN(this->get_logger(), "No obstacles found in world file: %s",
+        world_file.c_str());
+        return;
+      }
+
+      for (const auto & obs : config["obstacles"]) {
+        BoxObstacle box;
+        box.name = obs["name"].as<std::string>();
+        box.x = obs["x"].as<double>();  
+        box.y = obs["y"].as<double>();
+        box.z = obs["z"].as<double>();
+        box.size_x = obs["size_x"].as<double>();
+        box.size_y = obs["size_y"].as<double>();
+        box.size_z = obs["size_z"].as<double>();
+
+        obstacles_.push_back(box);
+      }
+
+      RCLCPP_INFO(this->get_logger(), "Loaded %zu obstacles from %s", obstacles_.size(),
+      world_file.c_str());
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to load world file: %s", e.what());
+    }
+  }
   void initBulletWorld()
   {
     broadphase_ = new btDbvtBroadphase();
@@ -130,10 +175,13 @@ private:
     createRigidBody(0.0, ground_tf, ground_shape);
 
     createRobot();
-    addBoxObstacle(2.0, 0.0, 0.25, 0.5, 0.5, 0.5);
-    addBoxObstacle(3.0, 1.0, 0.25, 0.6, 0.6, 0.5);
-    addBoxObstacle(4.0, -1.0, 0.25, 0.6, 0.6, 0.5);
-    addBoxObstacle(5.0, 0.0, 0.25, 0.8, 0.8, 0.5);
+    for (const auto & box : obstacles_) {
+      addBoxObstacle(box.x, box.y, box.z, box.size_x, box.size_y, box.size_z);
+    }
+    //addBoxObstacle(2.0, 0.0, 0.25, 0.5, 0.5, 0.5);
+    //addBoxObstacle(3.0, 1.0, 0.25, 0.6, 0.6, 0.5);
+    //addBoxObstacle(4.0, -1.0, 0.25, 0.6, 0.6, 0.5);
+    //addBoxObstacle(5.0, 0.0, 0.25, 0.8, 0.8, 0.5);
   }
 
   void createRobot()
@@ -404,37 +452,41 @@ private:
       markers.markers.push_back(marker);
     }
 
-    std::vector<std::tuple<double, double, double, double, double>> boxes = {
-      {2.0, 0.0, 0.25, 0.5, 0.5},
-      {3.0, 1.0, 0.25, 0.6, 0.6},
-      {4.0, -1.0, 0.25, 0.6, 0.6},
-      {5.0, 0.0, 0.25, 0.8, 0.8},
-    };
-
     int box_id = 100;
-    for (const auto & box : boxes) {
-      auto [x, y, z, sx, sy] = box;
 
-      visualization_msgs::msg::Marker marker;
-      marker.header.frame_id = "map";
-      marker.header.stamp = this->now();
-      marker.ns = "obstacles";
-      marker.id = box_id++;
-      marker.type = visualization_msgs::msg::Marker::CUBE;
-      marker.action = visualization_msgs::msg::Marker::ADD;
-      marker.pose.position.x = x;
-      marker.pose.position.y = y;
-      marker.pose.position.z = z;
-      marker.pose.orientation.w = 1.0;
-      marker.scale.x = sx;
-      marker.scale.y = sy;
-      marker.scale.z = 0.5;
-      marker.color.r = 1.0;
-      marker.color.g = 0.2;
-      marker.color.b = 0.1;
-      marker.color.a = 1.0;
-      markers.markers.push_back(marker);
-    }
+for (const auto & box : obstacles_) {
+
+  visualization_msgs::msg::Marker marker;
+
+  marker.header.frame_id = "map";
+  marker.header.stamp = this->now();
+  marker.ns = "obstacles";
+  marker.id = box_id++;
+
+  marker.type = visualization_msgs::msg::Marker::CUBE;
+  marker.action = visualization_msgs::msg::Marker::ADD;
+
+  marker.pose.position.x = box.x;
+  marker.pose.position.y = box.y;
+  marker.pose.position.z = box.z;
+
+  marker.pose.orientation.x = 0.0;
+  marker.pose.orientation.y = 0.0;
+  marker.pose.orientation.z = 0.0;
+  marker.pose.orientation.w = 1.0;
+
+  marker.scale.x = box.size_x;
+  marker.scale.y = box.size_y;
+  marker.scale.z = box.size_z;
+
+  marker.color.r = 1.0;
+  marker.color.g = 0.2;
+  marker.color.b = 0.1;
+  marker.color.a = 1.0;
+
+  markers.markers.push_back(marker);
+}
+    
 
     marker_pub_->publish(markers);
   }
@@ -524,6 +576,7 @@ private:
   std::vector<btRigidBody *> rigid_bodies_;
   std::vector<btTypedConstraint *> constraints_;
   std::vector<Wheel> wheels_;
+  std::vector<BoxObstacle> obstacles_;
 
   btRigidBody * robot_body_ = nullptr;
 
@@ -532,7 +585,7 @@ private:
 
   const double wheel_radius_ = 0.0625;
   const double track_width_ = 0.448;
-  const double motor_max_impulse_ = 2.0;
+  const double motor_max_impulse_ = 5.0; // oringinal 2.0 
 
   double linear_velocity_ = 0.0;
   double angular_velocity_ = 0.0;

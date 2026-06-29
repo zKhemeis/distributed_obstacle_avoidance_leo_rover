@@ -1,0 +1,32 @@
+obstacles:
+  - name: box_1
+    x: 2.0
+    y: 0.0
+    z: 0.25
+    size_x: 0.5
+    size_y: 0.5
+    size_z: 0.5
+
+  - name: box_2
+    x: 3.0
+    y: 1.0
+    z: 0.25
+    size_x: 0.6
+    size_y: 0.6
+    size_z: 0.5
+
+  - name: box_3
+    x: 4.0
+    y: -1.0
+    z: 0.25
+    size_x: 0.6
+    size_y: 0.6
+    size_z: 0.5
+
+  - name: box_4
+    x: 5.0
+    y: 0.0
+    z: 0.25
+    size_x: 0.8
+    size_y: 0.8
+    size_z: 0.5
