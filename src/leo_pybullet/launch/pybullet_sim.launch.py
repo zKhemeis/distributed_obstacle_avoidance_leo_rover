@@ -7,7 +7,7 @@ from launch_ros.actions import Node
 def generate_launch_description():
     world_arg = DeclareLaunchArgument(
         "world",
-        default_value="/root/leo_ws/src/leo_pybullet/worlds/boxes_world.yaml",
+        default_value="boxes",
         description="Path to YAML world file",
     )
 

@@ -52,11 +52,17 @@ public:
     );
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     
-    const std::string world_file =
+    std::string world_file =
       this->declare_parameter<std::string>(
         "world",
-        "/root/leo_ws/src/leo_pybullet/worlds/boxes_world.yaml"
+        "boxes"
       );
+
+    if (world_file == "boxes") {
+      world_file = "/root/leo_ws/src/leo_pybullet/worlds/boxes_world.yaml";
+    } else if (world_file == "empty") {
+      world_file = "/root/leo_ws/src/leo_pybullet/worlds/empty_world.yaml";
+    }
 
     loadWorldFromYaml(world_file);
     initBulletWorld();
