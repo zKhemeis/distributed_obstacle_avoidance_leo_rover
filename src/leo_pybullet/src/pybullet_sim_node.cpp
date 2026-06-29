@@ -52,7 +52,13 @@ public:
     );
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     
-    loadWorldFromYaml("/root/leo_ws/src/leo_pybullet/worlds/boxes_world.yaml");
+    const std::string world_file =
+      this->declare_parameter<std::string>(
+        "world",
+        "/root/leo_ws/src/leo_pybullet/worlds/boxes_world.yaml"
+      );
+
+    loadWorldFromYaml(world_file);
     initBulletWorld();
 
     timer_ = this->create_wall_timer(
@@ -358,7 +364,13 @@ private:
       const double local_angle = scan.angle_min + i * scan.angle_increment;
       const double global_angle = yaw + local_angle;
 
-      const btVector3 ray_from(lidar_world_x, lidar_world_y, lidar_world_z);
+      const double ray_start_offset = 0.25;
+
+      const btVector3 ray_from(
+        lidar_world_x + ray_start_offset * std::cos(global_angle),
+        lidar_world_y + ray_start_offset * std::sin(global_angle),
+        lidar_world_z
+      );
 
       const btVector3 ray_to(
         lidar_world_x + scan.range_max * std::cos(global_angle),
@@ -372,7 +384,8 @@ private:
 
       if (ray_callback.hasHit()) {
         const double distance =
-          scan.range_max * ray_callback.m_closestHitFraction;
+          ray_start_offset +
+          (scan.range_max - ray_start_offset) * ray_callback.m_closestHitFraction;
 
         if (distance >= scan.range_min && distance <= scan.range_max) {
           scan.ranges[i] = static_cast<float>(distance);
