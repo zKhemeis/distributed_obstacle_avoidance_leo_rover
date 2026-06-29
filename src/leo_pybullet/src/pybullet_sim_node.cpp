@@ -10,6 +10,7 @@
 #include "visualization_msgs/msg/marker_array.hpp"
 
 #include "btBulletDynamicsCommon.h"
+#include "nav_msgs/msg/odometry.hpp"
 
 struct Wheel
 {
@@ -30,6 +31,7 @@ public:
     );
 
     scan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
+    odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
       "/pybullet_markers", 10
     );
@@ -229,6 +231,7 @@ private:
     if (step_count_ % scan_publish_every_n_steps_ == 0) {
       publishRaycastScan();
       publishMarkers();
+      publishOdom();
     }
 
     if (step_count_ % static_cast<int>(physics_rate_) == 0) {
@@ -244,8 +247,8 @@ private:
     const double right_linear =
       linear_velocity_ + angular_velocity_ * track_width_ / 2.0;
 
-    const double left_wheel_speed = -left_linear / wheel_radius_;
-    const double right_wheel_speed = -right_linear / wheel_radius_;
+    const double left_wheel_speed =  left_linear / wheel_radius_;
+    const double right_wheel_speed = right_linear / wheel_radius_;
 
     for (auto & wheel : wheels_) {
       const double target_speed =
@@ -432,7 +435,40 @@ private:
 
     marker_pub_->publish(markers);
   }
+  void publishOdom()
+  {
+    btTransform tf;
+    robot_body_->getMotionState()->getWorldTransform(tf);
 
+    const btVector3 pos = tf.getOrigin();
+    const btQuaternion q = tf.getRotation();
+    const btVector3 lin_vel = robot_body_->getLinearVelocity();
+    const btVector3 ang_vel = robot_body_->getAngularVelocity();
+
+    nav_msgs::msg::Odometry odom;
+    odom.header.stamp = this->now();
+    odom.header.frame_id = "odom";
+    odom.child_frame_id = "base_link";
+
+    odom.pose.pose.position.x = pos.x();
+    odom.pose.pose.position.y = pos.y();
+    odom.pose.pose.position.z = pos.z();
+
+    odom.pose.pose.orientation.x = q.x();
+    odom.pose.pose.orientation.y = q.y();
+    odom.pose.pose.orientation.z = q.z();
+    odom.pose.pose.orientation.w = q.w();
+
+    odom.twist.twist.linear.x = lin_vel.x();
+    odom.twist.twist.linear.y = lin_vel.y();
+    odom.twist.twist.linear.z = lin_vel.z();
+
+    odom.twist.twist.angular.x = ang_vel.x();
+    odom.twist.twist.angular.y = ang_vel.y();
+    odom.twist.twist.angular.z = ang_vel.z();
+
+    odom_pub_->publish(odom);
+  }
   void printStatus()
   {
     btTransform tf;
@@ -455,6 +491,7 @@ private:
 
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
