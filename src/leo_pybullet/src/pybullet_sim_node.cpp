@@ -7,9 +7,16 @@
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 #include "btBulletDynamicsCommon.h"
-#include "visualization_msgs/msg/marker_array.hpp"
+
+struct Wheel
+{
+  btRigidBody * body = nullptr;
+  btHingeConstraint * hinge = nullptr;
+  bool left_side = true;
+};
 
 class LeoPybulletSimNode : public rclcpp::Node
 {
@@ -24,8 +31,7 @@ public:
 
     scan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-      "/pybullet_markers",
-      10
+      "/pybullet_markers", 10
     );
 
     initBulletWorld();
@@ -37,11 +43,16 @@ public:
 
     start_wall_time_ = std::chrono::steady_clock::now();
 
-    RCLCPP_INFO(this->get_logger(), "Real Bullet physics simulator started");
+    RCLCPP_INFO(this->get_logger(), "Bullet simulator with physical wheel motors started");
   }
 
   ~LeoPybulletSimNode()
   {
+    for (auto constraint : constraints_) {
+      dynamics_world_->removeConstraint(constraint);
+      delete constraint;
+    }
+
     for (auto body : rigid_bodies_) {
       dynamics_world_->removeRigidBody(body);
       delete body->getMotionState();
@@ -108,37 +119,91 @@ private:
 
     dynamics_world_->setGravity(btVector3(0, 0, -9.81));
 
-    // Ground plane
     auto * ground_shape = new btStaticPlaneShape(btVector3(0, 0, 1), 0);
     btTransform ground_tf;
     ground_tf.setIdentity();
-    ground_tf.setOrigin(btVector3(0, 0, 0));
     createRigidBody(0.0, ground_tf, ground_shape);
 
-    // Simple robot body
-    auto * robot_shape = new btBoxShape(btVector3(0.25, 0.18, 0.10));
-    btTransform robot_tf;
-    robot_tf.setIdentity();
-    robot_tf.setOrigin(btVector3(0, 0, 0.20));
-
-    robot_body_ = createRigidBody(5.0, robot_tf, robot_shape);
-    robot_body_->setActivationState(DISABLE_DEACTIVATION);
-    robot_body_->setFriction(1.0);
-
-    // Static obstacle boxes
+    createRobot();
     addBoxObstacle(2.0, 0.0, 0.25, 0.5, 0.5, 0.5);
     addBoxObstacle(3.0, 1.0, 0.25, 0.6, 0.6, 0.5);
     addBoxObstacle(4.0, -1.0, 0.25, 0.6, 0.6, 0.5);
     addBoxObstacle(5.0, 0.0, 0.25, 0.8, 0.8, 0.5);
   }
 
-  void addBoxObstacle(
-    double x,
-    double y,
-    double z,
-    double sx,
-    double sy,
-    double sz)
+  void createRobot()
+  {
+    auto * chassis_shape = new btBoxShape(btVector3(0.21, 0.14, 0.07));
+
+    btTransform chassis_tf;
+    chassis_tf.setIdentity();
+    chassis_tf.setOrigin(btVector3(0, 0, 0.17));
+
+    robot_body_ = createRigidBody(4.36, chassis_tf, chassis_shape);
+    robot_body_->setActivationState(DISABLE_DEACTIVATION);
+    robot_body_->setFriction(1.0);
+    robot_body_->setDamping(0.05, 0.2);
+
+    // Keep the rover mostly planar to avoid unrealistic flipping during this first wheel test.
+    robot_body_->setAngularFactor(btVector3(0.0, 0.0, 1.0));
+
+    addWheel(-0.15256,  0.224, true);   // FL
+    addWheel( 0.15256,  0.224, true);   // RL
+    addWheel( 0.15256, -0.224, false);  // FR
+    addWheel(-0.15256, -0.224, false);  // RR
+  }
+
+  void addWheel(double local_x, double local_y, bool left_side)
+  {
+    const double wheel_radius = 0.0625;
+    const double wheel_width = 0.07;
+
+    auto * wheel_shape = new btCylinderShape(
+      btVector3(wheel_radius, wheel_width / 2.0, wheel_radius)
+    );
+
+    btTransform chassis_tf;
+    robot_body_->getMotionState()->getWorldTransform(chassis_tf);
+    const btVector3 chassis_pos = chassis_tf.getOrigin();
+
+    btTransform wheel_tf;
+    wheel_tf.setIdentity();
+    wheel_tf.setOrigin(
+      chassis_pos + btVector3(local_x, local_y, -0.10)
+    );
+
+    auto * wheel_body = createRigidBody(0.283642, wheel_tf, wheel_shape);
+    wheel_body->setActivationState(DISABLE_DEACTIVATION);
+    wheel_body->setFriction(2.0);
+    wheel_body->setRollingFriction(0.02);
+    wheel_body->setDamping(0.01, 0.01);
+
+    btVector3 pivot_in_chassis(local_x, local_y, -0.1175);
+    btVector3 pivot_in_wheel(0, 0, 0);
+
+    btVector3 axis_in_chassis(0, 1, 0);
+    btVector3 axis_in_wheel(0, 1, 0);
+
+    auto * hinge = new btHingeConstraint(
+      *robot_body_,
+      *wheel_body,
+      pivot_in_chassis,
+      pivot_in_wheel,
+      axis_in_chassis,
+      axis_in_wheel,
+      true
+    );
+
+    hinge->setLimit(1.0, -1.0);
+    hinge->enableAngularMotor(true, 0.0, motor_max_impulse_);
+
+    dynamics_world_->addConstraint(hinge, true);
+    constraints_.push_back(hinge);
+
+    wheels_.push_back({wheel_body, hinge, left_side});
+  }
+
+  void addBoxObstacle(double x, double y, double z, double sx, double sy, double sz)
   {
     auto * shape = new btBoxShape(btVector3(sx / 2.0, sy / 2.0, sz / 2.0));
 
@@ -154,7 +219,7 @@ private:
   {
     const double dt = 1.0 / physics_rate_;
 
-    applyVelocityCommand();
+    applyWheelMotorCommands();
 
     dynamics_world_->stepSimulation(dt, 1, dt);
 
@@ -164,7 +229,6 @@ private:
     if (step_count_ % scan_publish_every_n_steps_ == 0) {
       publishRaycastScan();
       publishMarkers();
-      
     }
 
     if (step_count_ % static_cast<int>(physics_rate_) == 0) {
@@ -172,18 +236,23 @@ private:
     }
   }
 
-  void applyVelocityCommand()
+  void applyWheelMotorCommands()
   {
-    btTransform tf;
-    robot_body_->getMotionState()->getWorldTransform(tf);
+    const double left_linear =
+      linear_velocity_ - angular_velocity_ * track_width_ / 2.0;
 
-    const double yaw = getYaw(tf);
+    const double right_linear =
+      linear_velocity_ + angular_velocity_ * track_width_ / 2.0;
 
-    const double vx = linear_velocity_ * std::cos(yaw);
-    const double vy = linear_velocity_ * std::sin(yaw);
+    const double left_wheel_speed = left_linear / wheel_radius_;
+    const double right_wheel_speed = right_linear / wheel_radius_;
 
-    robot_body_->setLinearVelocity(btVector3(vx, vy, 0.0));
-    robot_body_->setAngularVelocity(btVector3(0.0, 0.0, angular_velocity_));
+    for (auto & wheel : wheels_) {
+      const double target_speed =
+        wheel.left_side ? left_wheel_speed : right_wheel_speed;
+
+      wheel.hinge->enableAngularMotor(true, target_speed, motor_max_impulse_);
+    }
   }
 
   double getYaw(const btTransform & tf) const
@@ -191,9 +260,7 @@ private:
     btScalar roll;
     btScalar pitch;
     btScalar yaw;
-
     tf.getBasis().getEulerYPR(yaw, pitch, roll);
-
     return static_cast<double>(yaw);
   }
 
@@ -207,7 +274,6 @@ private:
     scan.angle_min = -M_PI;
     scan.angle_max = M_PI;
     scan.angle_increment = M_PI / 180.0;
-
     scan.range_min = 0.12;
     scan.range_max = 3.5;
 
@@ -224,25 +290,30 @@ private:
     const btVector3 robot_pos = robot_tf.getOrigin();
     const double yaw = getYaw(robot_tf);
 
-    const double lidar_z = 0.25;
+    const double lidar_x = 0.10;
+    const double lidar_y = 0.0;
+    const double lidar_z = 0.08;
+
+    const double lidar_world_x =
+      robot_pos.x() + std::cos(yaw) * lidar_x - std::sin(yaw) * lidar_y;
+    const double lidar_world_y =
+      robot_pos.y() + std::sin(yaw) * lidar_x + std::cos(yaw) * lidar_y;
+    const double lidar_world_z = robot_pos.z() + lidar_z;
 
     for (int i = 0; i < number_of_rays; ++i) {
       const double local_angle = scan.angle_min + i * scan.angle_increment;
       const double global_angle = yaw + local_angle;
 
-      const btVector3 ray_from(
-        robot_pos.x(),
-        robot_pos.y(),
-        lidar_z
-      );
+      const btVector3 ray_from(lidar_world_x, lidar_world_y, lidar_world_z);
 
       const btVector3 ray_to(
-        robot_pos.x() + scan.range_max * std::cos(global_angle),
-        robot_pos.y() + scan.range_max * std::sin(global_angle),
-        lidar_z
+        lidar_world_x + scan.range_max * std::cos(global_angle),
+        lidar_world_y + scan.range_max * std::sin(global_angle),
+        lidar_world_z
       );
 
       btCollisionWorld::ClosestRayResultCallback ray_callback(ray_from, ray_to);
+      ray_callback.m_collisionFilterGroup = btBroadphaseProxy::SensorTrigger;
       dynamics_world_->rayTest(ray_from, ray_to, ray_callback);
 
       if (ray_callback.hasHit()) {
@@ -260,6 +331,106 @@ private:
     }
 
     scan_pub_->publish(scan);
+  }
+
+  void publishMarkers()
+  {
+    visualization_msgs::msg::MarkerArray markers;
+
+    auto makeQuat = [](const btQuaternion & q_bt) {
+      geometry_msgs::msg::Quaternion q;
+      q.x = q_bt.x();
+      q.y = q_bt.y();
+      q.z = q_bt.z();
+      q.w = q_bt.w();
+      return q;
+    };
+
+    btTransform chassis_tf;
+    robot_body_->getMotionState()->getWorldTransform(chassis_tf);
+
+    visualization_msgs::msg::Marker chassis;
+    chassis.header.frame_id = "map";
+    chassis.header.stamp = this->now();
+    chassis.ns = "leo_robot";
+    chassis.id = 0;
+    chassis.type = visualization_msgs::msg::Marker::CUBE;
+    chassis.action = visualization_msgs::msg::Marker::ADD;
+    chassis.pose.position.x = chassis_tf.getOrigin().x();
+    chassis.pose.position.y = chassis_tf.getOrigin().y();
+    chassis.pose.position.z = chassis_tf.getOrigin().z();
+    chassis.pose.orientation = makeQuat(chassis_tf.getRotation());
+    chassis.scale.x = 0.50;
+    chassis.scale.y = 0.36;
+    chassis.scale.z = 0.16;
+    chassis.color.r = 0.1;
+    chassis.color.g = 0.4;
+    chassis.color.b = 1.0;
+    chassis.color.a = 1.0;
+    markers.markers.push_back(chassis);
+
+    int id = 1;
+    for (const auto & wheel : wheels_) {
+      btTransform wheel_tf;
+      wheel.body->getMotionState()->getWorldTransform(wheel_tf);
+
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->now();
+      marker.ns = "leo_robot";
+      marker.id = id++;
+      marker.type = visualization_msgs::msg::Marker::CYLINDER;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      marker.pose.position.x = wheel_tf.getOrigin().x();
+      marker.pose.position.y = wheel_tf.getOrigin().y();
+      marker.pose.position.z = wheel_tf.getOrigin().z();
+      btQuaternion wheel_marker_rotation =
+        wheel_tf.getRotation() * btQuaternion(btVector3(1, 0, 0), M_PI / 2.0);
+
+      marker.pose.orientation = makeQuat(wheel_marker_rotation);
+      marker.scale.x = 0.125;
+      marker.scale.y = 0.125;
+      marker.scale.z = 0.07;
+      marker.color.r = 0.02;
+      marker.color.g = 0.02;
+      marker.color.b = 0.02;
+      marker.color.a = 1.0;
+      markers.markers.push_back(marker);
+    }
+
+    std::vector<std::tuple<double, double, double, double, double>> boxes = {
+      {2.0, 0.0, 0.25, 0.5, 0.5},
+      {3.0, 1.0, 0.25, 0.6, 0.6},
+      {4.0, -1.0, 0.25, 0.6, 0.6},
+      {5.0, 0.0, 0.25, 0.8, 0.8},
+    };
+
+    int box_id = 100;
+    for (const auto & box : boxes) {
+      auto [x, y, z, sx, sy] = box;
+
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->now();
+      marker.ns = "obstacles";
+      marker.id = box_id++;
+      marker.type = visualization_msgs::msg::Marker::CUBE;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      marker.pose.position.x = x;
+      marker.pose.position.y = y;
+      marker.pose.position.z = z;
+      marker.pose.orientation.w = 1.0;
+      marker.scale.x = sx;
+      marker.scale.y = sy;
+      marker.scale.z = 0.5;
+      marker.color.r = 1.0;
+      marker.color.g = 0.2;
+      marker.color.b = 0.1;
+      marker.color.a = 1.0;
+      markers.markers.push_back(marker);
+    }
+
+    marker_pub_->publish(markers);
   }
 
   void printStatus()
@@ -281,149 +452,7 @@ private:
       pos.x(), pos.y(), yaw, sim_time_, rtf
     );
   }
-  void publishMarkers()
-  {
-    visualization_msgs::msg::MarkerArray markers;
 
-    btTransform robot_tf;
-    robot_body_->getMotionState()->getWorldTransform(robot_tf);
-
-    const btVector3 robot_pos = robot_tf.getOrigin();
-    const double yaw = getYaw(robot_tf);
-
-    const auto makeQuatFromYaw = [](double yaw_angle) {
-      geometry_msgs::msg::Quaternion q;
-      q.x = 0.0;
-      q.y = 0.0;
-      q.z = std::sin(yaw_angle / 2.0);
-      q.w = std::cos(yaw_angle / 2.0);
-      return q;
-    };
-
-    const auto transformPoint = [&](double lx, double ly, double lz) {
-      geometry_msgs::msg::Point p;
-      p.x = robot_pos.x() + std::cos(yaw) * lx - std::sin(yaw) * ly;
-      p.y = robot_pos.y() + std::sin(yaw) * lx + std::cos(yaw) * ly;
-      p.z = robot_pos.z() + lz;
-      return p;
-    };
-
-    // Chassis
-    visualization_msgs::msg::Marker chassis;
-    chassis.header.frame_id = "map";
-    chassis.header.stamp = this->now();
-    chassis.ns = "leo_robot";
-    chassis.id = 0;
-    chassis.type = visualization_msgs::msg::Marker::CUBE;
-    chassis.action = visualization_msgs::msg::Marker::ADD;
-    chassis.pose.position = transformPoint(0.0, 0.0, 0.0);
-    chassis.pose.orientation = makeQuatFromYaw(yaw);
-    chassis.scale.x = 0.42;
-    chassis.scale.y = 0.28;
-    chassis.scale.z = 0.16;
-    chassis.color.r = 0.1;
-    chassis.color.g = 0.4;
-    chassis.color.b = 1.0;
-    chassis.color.a = 1.0;
-    markers.markers.push_back(chassis);
-
-    // LiDAR position from URDF scan_joint xyz="0.10 0 0.08"
-    visualization_msgs::msg::Marker lidar;
-    lidar.header.frame_id = "map";
-    lidar.header.stamp = this->now();
-    lidar.ns = "leo_robot";
-    lidar.id = 1;
-    lidar.type = visualization_msgs::msg::Marker::SPHERE;
-    lidar.action = visualization_msgs::msg::Marker::ADD;
-    lidar.pose.position = transformPoint(0.10, 0.0, 0.08);
-    lidar.pose.orientation.w = 1.0;
-    lidar.scale.x = 0.06;
-    lidar.scale.y = 0.06;
-    lidar.scale.z = 0.04;
-    lidar.color.r = 0.0;
-    lidar.color.g = 1.0;
-    lidar.color.b = 0.0;
-    lidar.color.a = 1.0;
-    markers.markers.push_back(lidar);
-
-  // Wheel positions, approximated from URDF:
-  // rocker joints at y= +/-0.14167, wheel offsets x= +/-0.15256, y=-0.08214.
-  // This gives approximate wheel y positions around +/-0.224.
-    struct WheelVis {
-      double x;
-      double y;
-      int id;
-    };
-
-    std::vector<WheelVis> wheels = {
-      {-0.15256,  0.224, 2},  // FL
-      { 0.15256,  0.224, 3},  // RL
-      { 0.15256, -0.224, 4},  // FR
-      {-0.15256, -0.224, 5},  // RR
-    };
-
-    for (const auto & wheel : wheels) {
-      visualization_msgs::msg::Marker marker;
-      marker.header.frame_id = "map";
-      marker.header.stamp = this->now();
-      marker.ns = "leo_robot";
-      marker.id = wheel.id;
-      marker.type = visualization_msgs::msg::Marker::CYLINDER;
-      marker.action = visualization_msgs::msg::Marker::ADD;
-      marker.pose.position = transformPoint(wheel.x, wheel.y, -0.10);
-
-    // Simple wheel cylinder orientation.
-    // In RViz a cylinder is along z by default. This rotates it approximately to wheel axis.
-      marker.pose.orientation.x = 0.7071;
-      marker.pose.orientation.y = 0.0;
-      marker.pose.orientation.z = 0.0;
-      marker.pose.orientation.w = 0.7071;
-
-      marker.scale.x = 0.125;  // diameter
-      marker.scale.y = 0.125;  // diameter
-      marker.scale.z = 0.07;   // width
-      marker.color.r = 0.02;
-      marker.color.g = 0.02;
-      marker.color.b = 0.02;
-      marker.color.a = 1.0;
-      markers.markers.push_back(marker);
-    }
-
-    // Obstacles
-    std::vector<std::tuple<double, double, double, double, double>> boxes = {
-      {2.0, 0.0, 0.25, 0.5, 0.5},
-      {3.0, 1.0, 0.25, 0.6, 0.6},
-      {4.0, -1.0, 0.25, 0.6, 0.6},
-      {5.0, 0.0, 0.25, 0.8, 0.8},
-    };
-
-    int id = 100;
-    for (const auto & box : boxes) {
-      auto [x, y, z, sx, sy] = box;
-
-      visualization_msgs::msg::Marker marker;
-      marker.header.frame_id = "map";
-      marker.header.stamp = this->now();
-      marker.ns = "obstacles";
-      marker.id = id++;
-      marker.type = visualization_msgs::msg::Marker::CUBE;
-      marker.action = visualization_msgs::msg::Marker::ADD;
-      marker.pose.position.x = x;
-      marker.pose.position.y = y;
-      marker.pose.position.z = z;
-      marker.pose.orientation.w = 1.0;
-      marker.scale.x = sx;
-      marker.scale.y = sy;
-      marker.scale.z = 0.5;
-      marker.color.r = 1.0;
-      marker.color.g = 0.2;
-      marker.color.b = 0.1;
-      marker.color.a = 1.0;
-      markers.markers.push_back(marker);
-    }
-
-    marker_pub_->publish(markers);
-  }
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
@@ -437,11 +466,17 @@ private:
 
   std::vector<btCollisionShape *> collision_shapes_;
   std::vector<btRigidBody *> rigid_bodies_;
+  std::vector<btTypedConstraint *> constraints_;
+  std::vector<Wheel> wheels_;
 
   btRigidBody * robot_body_ = nullptr;
 
   const double physics_rate_ = 240.0;
   const int scan_publish_every_n_steps_ = 24;
+
+  const double wheel_radius_ = 0.0625;
+  const double track_width_ = 0.448;
+  const double motor_max_impulse_ = 2.0;
 
   double linear_velocity_ = 0.0;
   double angular_velocity_ = 0.0;
