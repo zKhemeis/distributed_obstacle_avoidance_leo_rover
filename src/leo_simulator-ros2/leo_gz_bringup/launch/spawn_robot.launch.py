@@ -88,10 +88,8 @@ def spawn_robot(context: LaunchContext, namespace: LaunchConfiguration):
             robot_ns + "/odom@nav_msgs/msg/Odometry[ignition.msgs.Odometry",
             robot_ns + "/tf@tf2_msgs/msg/TFMessage[ignition.msgs.Pose_V",
             robot_ns + "/imu/data_raw@sensor_msgs/msg/Imu[ignition.msgs.IMU",
-            # Camera disabled for LiDAR-only simulation
-            #robot_ns
-           # + "/camera/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo",
-            robot_ns + "/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan", # new for lidar
+            robot_ns
+            + "/camera/camera_info@sensor_msgs/msg/CameraInfo[ignition.msgs.CameraInfo",
             robot_ns + "/joint_states@sensor_msgs/msg/JointState[ignition.msgs.Model",
         ],
         parameters=[
@@ -103,18 +101,18 @@ def spawn_robot(context: LaunchContext, namespace: LaunchConfiguration):
     )
 
     # Camera image bridge
-    #image_bridge = Node(
-     #   package="ros_gz_image",
-      #  executable="image_bridge",
-       # name=node_name_prefix + "image_bridge",
-        #arguments=[robot_ns + "/camera/image_raw"],
-        #output="screen",
-    #)
+    image_bridge = Node(
+        package="ros_gz_image",
+        executable="image_bridge",
+        name=node_name_prefix + "image_bridge",
+        arguments=[robot_ns + "/camera/image_raw"],
+        output="screen",
+    )
     return [
         robot_state_publisher,
         leo_rover,
         topic_bridge,
-        #image_bridge,
+        image_bridge,
     ]
 
 

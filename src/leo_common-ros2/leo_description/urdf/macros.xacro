@@ -164,31 +164,7 @@
 
     <link name="${link_prefix}camera_frame"/>
     <link name="${link_prefix}camera_optical_frame"/>
-    <!-- new link for the Lidar -->
     <link name="${link_prefix}imu_frame"/>
-        <link name="${link_prefix}base_scan">
-      <visual>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
-        <geometry>
-          <cylinder radius="0.0508" length="0.055"/>
-        </geometry>
-      </visual>
-
-      <collision>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
-        <geometry>
-          <cylinder radius="0.0508" length="0.055"/>
-        </geometry>
-      </collision>
-
-      <inertial>
-        <mass value="0.114"/>
-        <origin xyz="0 0 0"/>
-        <inertia ixx="0.001" ixy="0.0" ixz="0.0"
-                 iyy="0.001" iyz="0.0"
-                 izz="0.001"/>
-      </inertial>
-    </link>
 
     <!-- JOINTS -->
 
@@ -306,12 +282,6 @@
       <origin xyz="${imu_translation}" rpy="0 0 0"/>
       <parent link="${link_prefix}base_link"/>
       <child link="${link_prefix}imu_frame"/>
-    <!-- new lidar joint -->
-    </joint>
-        <joint name="${joint_prefix}scan_joint" type="fixed">
-      <origin xyz="0.10 0 0.08" rpy="0 0 0"/>
-      <parent link="${link_prefix}base_link"/>
-      <child link="${link_prefix}base_scan"/>
     </joint>
 
   </xacro:macro>
@@ -483,8 +453,8 @@
         </surface>
       </collision>
     </gazebo>
-    <!-- camera disabled for LiDAR-only simulation TODO remove to reuse the cam -->
-    <!-- camera 
+
+    <!-- camera -->
     <gazebo reference="${link_prefix}camera_frame">
       <sensor name="camera" type="camera">
           <camera name="leo_camera">
@@ -520,45 +490,7 @@
           <gz_frame_id>${link_prefix}camera_optical_frame</gz_frame_id>
       </sensor>
     </gazebo>
-    -->
-    <!-- 2D LiDAR configured according to SLAMTEC RPLIDAR C1 specifications -->
-<gazebo reference="${link_prefix}base_scan">
-  <sensor name="rplidar_c1" type="gpu_lidar">
-    <always_on>1</always_on>
-    <visualize>true</visualize>
-    <update_rate>10</update_rate>
-    <topic>${link_prefix}scan</topic>
 
-    <lidar>
-      <scan>
-        <horizontal>
-          <!-- RPLIDAR C1: 5000 samples/s at 10 Hz -> approx. 500 samples/scan -->
-          <samples>500</samples>
-          <resolution>1</resolution>
-          <min_angle>0.0</min_angle>
-          <max_angle>6.28318530718</max_angle>
-        </horizontal>
-      </scan>
-
-      <range>
-        <!-- RPLIDAR C1: 0.05 m blind range, 12 m range radius -->
-        <min>0.05</min>
-        <max>12.0</max>
-        <!-- RPLIDAR C1 ranging resolution: approx. 30 mm -->
-        <resolution>0.03</resolution>
-      </range>
-
-      <noise>
-        <type>gaussian</type>
-        <mean>0.0</mean>
-        <stddev>0.03</stddev>
-      </noise>
-    </lidar>
-
-    <ignition_frame_id>${link_prefix}base_scan</ignition_frame_id>
-    <gz_frame_id>${link_prefix}base_scan</gz_frame_id>
-  </sensor>
-</gazebo>
     <!-- rocker differential -->
     <gazebo>
       <plugin name="leo_gz::DifferentialSystem" filename="libleo_gz_differential_plugin.so">

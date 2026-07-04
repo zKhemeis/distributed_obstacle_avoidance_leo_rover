@@ -10,3 +10,4 @@ log/
 *.bag
 *.db3
 .vscode/
+src/leo_pybullet/results/
