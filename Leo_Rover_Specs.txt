@@ -1,0 +1,3 @@
+# Specs for the Leo Rover, Lidar Sensor, etc.
+
+3200 beams
