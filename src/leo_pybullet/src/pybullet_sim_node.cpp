@@ -15,6 +15,7 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "tf2_ros/transform_broadcaster.h"
+#include "sensor_msgs/msg/imu.hpp"
 
 struct Wheel
 {
@@ -47,6 +48,7 @@ public:
 
     scan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
     odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", 10);
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
       "/pybullet_markers", 10
     );
@@ -295,6 +297,7 @@ private:
       publishRaycastScan();
       publishMarkers();
       publishOdom();
+      publishImu();
     }
 
     if (step_count_ % static_cast<int>(physics_rate_) == 0) {
@@ -564,6 +567,42 @@ for (const auto & box : obstacles_) {
 
     tf_broadcaster_->sendTransform(tf_msg);
   }
+void publishImu()
+{
+  btTransform tf;
+  robot_body_->getMotionState()->getWorldTransform(tf);
+
+  const btQuaternion q = tf.getRotation();
+  const btVector3 angular_velocity = robot_body_->getAngularVelocity();
+  const btVector3 linear_velocity = robot_body_->getLinearVelocity();
+
+  const double dt = 1.0 / 10.0;
+
+  btVector3 linear_acceleration =
+    (linear_velocity - previous_linear_velocity_) / dt;
+
+  previous_linear_velocity_ = linear_velocity;
+
+  sensor_msgs::msg::Imu imu;
+
+  imu.header.stamp = this->now();
+  imu.header.frame_id = "imu_frame";
+
+  imu.orientation.x = q.x();
+  imu.orientation.y = q.y();
+  imu.orientation.z = q.z();
+  imu.orientation.w = q.w();
+
+  imu.angular_velocity.x = angular_velocity.x();
+  imu.angular_velocity.y = angular_velocity.y();
+  imu.angular_velocity.z = angular_velocity.z();
+
+  imu.linear_acceleration.x = linear_acceleration.x();
+  imu.linear_acceleration.y = linear_acceleration.y();
+  imu.linear_acceleration.z = linear_acceleration.z();
+
+  imu_pub_->publish(imu);
+}  
   void printStatus()
   {
     btTransform tf;
@@ -588,9 +627,11 @@ for (const auto & box : obstacles_) {
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
-
+  
+  btVector3 previous_linear_velocity_ = btVector3(0, 0, 0); 
   btBroadphaseInterface * broadphase_ = nullptr;
   btDefaultCollisionConfiguration * collision_config_ = nullptr;
   btCollisionDispatcher * dispatcher_ = nullptr;
