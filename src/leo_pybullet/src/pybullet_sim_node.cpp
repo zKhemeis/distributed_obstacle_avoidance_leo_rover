@@ -337,17 +337,23 @@ private:
     scan.header.stamp = this->now();
     scan.header.frame_id = "base_scan";
 
-    scan.angle_min = -M_PI;
-    scan.angle_max = M_PI;
-    scan.angle_increment = M_PI / 180.0;
-    scan.range_min = 0.12;
-    scan.range_max = 3.5;
+    scan.angle_min = 0.0;
+    scan.angle_max = 2.0 * M_PI;
+    const int number_of_rays = 500;
 
-    const int number_of_rays = static_cast<int>(
-      (scan.angle_max - scan.angle_min) / scan.angle_increment
-    );
+    scan.angle_increment =
+        (scan.angle_max - scan.angle_min) /
+        static_cast<double>(number_of_rays);
+    scan.range_min = 0.05;
+    scan.range_max = 12.0;
 
-    scan.ranges.resize(number_of_rays);
+    scan.scan_time = 0.1;
+    scan.time_increment = scan.scan_time / number_of_rays;
+
+    scan.ranges.assign(
+        number_of_rays,
+        std::numeric_limits<float>::infinity());
+
     scan.intensities.assign(number_of_rays, 0.0);
 
     btTransform robot_tf;
@@ -370,7 +376,7 @@ private:
       const double local_angle = scan.angle_min + i * scan.angle_increment;
       const double global_angle = yaw + local_angle;
 
-      const double ray_start_offset = 0.25;
+      const double ray_start_offset = 0.08;
 
       const btVector3 ray_from(
         lidar_world_x + ray_start_offset * std::cos(global_angle),
