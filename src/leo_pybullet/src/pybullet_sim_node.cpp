@@ -3,6 +3,7 @@
 #include <limits>
 #include <memory>
 #include <vector>
+#include <array>
 #include "yaml-cpp/yaml.h"
 #include <string>
 
@@ -16,12 +17,15 @@
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "sensor_msgs/msg/imu.hpp"
+#include "sensor_msgs/msg/joint_state.hpp"
+#include "tf2_ros/static_transform_broadcaster.h"
 
 struct Wheel
 {
   btRigidBody * body = nullptr;
   btHingeConstraint * hinge = nullptr;
   bool left_side = true;
+  double target_velocity = 0.0;
 };
 
 struct BoxObstacle
@@ -49,11 +53,13 @@ public:
     scan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
     odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
     imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", 10);
-    marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-      "/pybullet_markers", 10
-    );
+    marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/pybullet_markers", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
-    
+    static_tf_broadcaster_ =
+  std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
+
+publishStaticTransforms();
+    joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
     std::string world_file =
       this->declare_parameter<std::string>(
         "world",
@@ -298,6 +304,7 @@ private:
       publishMarkers();
       publishOdom();
       publishImu();
+      publishJointStates();
     }
 
     if (step_count_ % static_cast<int>(physics_rate_) == 0) {
@@ -316,12 +323,19 @@ private:
     const double left_wheel_speed =  left_linear / wheel_radius_;
     const double right_wheel_speed = right_linear / wheel_radius_;
 
-    for (auto & wheel : wheels_) {
-      const double target_speed =
-        wheel.left_side ? left_wheel_speed : right_wheel_speed;
+const double dt = 1.0 / physics_rate_;
 
-      wheel.hinge->enableAngularMotor(true, target_speed, motor_max_impulse_);
-    }
+for (size_t i = 0; i < wheels_.size(); ++i) {
+  auto & wheel = wheels_[i];
+
+  const double target_speed =
+    wheel.left_side ? left_wheel_speed : right_wheel_speed;
+
+  wheel.target_velocity = target_speed;
+  wheel_positions_[i] += target_speed * dt;
+
+  wheel.hinge->enableAngularMotor(true, target_speed, motor_max_impulse_);
+}    
   }
 
   double getYaw(const btTransform & tf) const
@@ -603,6 +617,63 @@ void publishImu()
 
   imu_pub_->publish(imu);
 }  
+void publishJointStates()
+{
+  sensor_msgs::msg::JointState msg;
+
+  msg.header.stamp = this->now();
+
+  msg.name = {
+    "wheel_FL_joint",
+    "wheel_RL_joint",
+    "wheel_FR_joint",
+    "wheel_RR_joint"
+  };
+
+  msg.position.resize(4);
+  msg.velocity.resize(4);
+  msg.effort.resize(4);
+
+  for (size_t i = 0; i < 4; ++i) {
+    msg.position[i] = wheel_positions_[i];
+    msg.velocity[i] = wheels_[i].target_velocity;
+    msg.effort[i] = 0.0;
+  }
+
+  joint_state_pub_->publish(msg);
+}
+void publishStaticTransforms()
+{
+  std::vector<geometry_msgs::msg::TransformStamped> transforms;
+
+  geometry_msgs::msg::TransformStamped scan_tf;
+  scan_tf.header.stamp = this->now();
+  scan_tf.header.frame_id = "base_link";
+  scan_tf.child_frame_id = "base_scan";
+  scan_tf.transform.translation.x = 0.10;
+  scan_tf.transform.translation.y = 0.0;
+  scan_tf.transform.translation.z = 0.08;
+  scan_tf.transform.rotation.x = 0.0;
+  scan_tf.transform.rotation.y = 0.0;
+  scan_tf.transform.rotation.z = 0.0;
+  scan_tf.transform.rotation.w = 1.0;
+  transforms.push_back(scan_tf);
+
+  geometry_msgs::msg::TransformStamped imu_tf;
+  imu_tf.header.stamp = this->now();
+  imu_tf.header.frame_id = "base_link";
+  imu_tf.child_frame_id = "imu_frame";
+  imu_tf.transform.translation.x = 0.0628;
+  imu_tf.transform.translation.y = -0.0314;
+  imu_tf.transform.translation.z = -0.0393;
+  imu_tf.transform.rotation.x = 0.0;
+  imu_tf.transform.rotation.y = 0.0;
+  imu_tf.transform.rotation.z = 0.0;
+  imu_tf.transform.rotation.w = 1.0;
+  transforms.push_back(imu_tf);
+
+  static_tf_broadcaster_->sendTransform(transforms);
+}
   void printStatus()
   {
     btTransform tf;
@@ -626,9 +697,11 @@ void publishImu()
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
   
   btVector3 previous_linear_velocity_ = btVector3(0, 0, 0); 
@@ -658,6 +731,13 @@ void publishImu()
 
   double sim_time_ = 0.0;
   int step_count_ = 0;
+std::array<double,4> wheel_positions_ =
+{
+    0.0,
+    0.0,
+    0.0,
+    0.0
+};  
 
   std::chrono::steady_clock::time_point start_wall_time_;
 };
