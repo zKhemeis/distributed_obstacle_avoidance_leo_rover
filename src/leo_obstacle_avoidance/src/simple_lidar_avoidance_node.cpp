@@ -51,11 +51,19 @@ private:
     return std::atan2(siny_cosp, cosy_cosp);
   }
 
-  void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
-  {
-    current_yaw_ = yawFromOdom(msg);
-    has_odom_ = true;
+void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+{
+  const double new_yaw = yawFromOdom(msg);
+
+  if (has_odom_ && turning_) {
+    const double delta_yaw = normalizeAngle(new_yaw - previous_yaw_);
+    accumulated_turn_angle_ += std::abs(delta_yaw);
   }
+
+  current_yaw_ = new_yaw;
+  previous_yaw_ = new_yaw;
+  has_odom_ = true;
+}
 
   void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr scan)
   {
@@ -72,7 +80,7 @@ private:
     }
 
     if (turning_) {
-      const double turned_angle = std::abs(normalizeAngle(current_yaw_ - turn_start_yaw_));
+      const double turned_angle = accumulated_turn_angle_;
       const double target_angle = target_turn_angle_deg_ * M_PI / 180.0;
 
       if (turned_angle < target_angle) {
@@ -117,15 +125,17 @@ private:
 
     if (closest_front < obstacle_threshold_) {
       turning_ = true;
-      turn_start_yaw_ = current_yaw_;
+      accumulated_turn_angle_ = 0.0;
+      previous_yaw_ = current_yaw_;
 
       cmd.linear.x = 0.0;
       cmd.angular.z = turn_speed_;
 
       RCLCPP_INFO(
         this->get_logger(),
-        "Obstacle ahead: %.2f m -> starting 90 degree turn",
-        closest_front
+        "Obstacle ahead: %.2f m -> starting %.1f degree turn",
+        closest_front , 
+        target_turn_angle_deg_
       );
     } else {
       cmd.linear.x = forward_speed_;
@@ -156,7 +166,8 @@ private:
   bool has_odom_ = false;
 
   double current_yaw_ = 0.0;
-  double turn_start_yaw_ = 0.0;
+  double previous_yaw_ = 0.0;
+  double accumulated_turn_angle_ = 0.0;
 };
 
 int main(int argc, char ** argv)
