@@ -272,10 +272,12 @@ class BugDeploy(Node):
 
         if self.state == EState.CHASE_GOAL and self._scan[FWD_BEAM] < ROBOT_RADIUS + 2*SAFETY_MARGIN:
             # There's an obstacle in the way. Bug around it
+            self.get_logger().info(f"Change of state: Now avoiding obstacle")
             self.state = EState.AVOIDING_OBSTACLE
             self.obstacle_state = EObstacleState.ROTATE
         elif self.state == EState.AVOIDING_OBSTACLE and self._scan[FWD_BEAM] > ROBOT_RADIUS + 2*SAFETY_MARGIN and angle_diff < 0.1*np.pi:
             # The path forward is clear and we're pointing towards the goal. Get going
+            self.get_logger().info(f"Change of state: Now driving towards goal")
             self.state = EState.CHASE_GOAL
 
         # Action time
@@ -303,10 +305,13 @@ class BugDeploy(Node):
             distance_to_wall = self._scan[RIGHT_BEAM] - (ROBOT_RADIUS + 2 * SAFETY_MARGIN)
             if self.obstacle_state == EObstacleState.ROTATE and np.abs(distance_to_wall) < SAFETY_MARGIN:
                 # Follow the wall to the right if it's close enough
+                self.get_logger().info(f"Change of substate: Following obstacle")
                 self.obstacle_state = EObstacleState.FOLLOW
             if self._scan[FWD_BEAM] < ROBOT_RADIUS + 2*SAFETY_MARGIN:
                 # Make sure there's enough space ahead
                 self.obstacle_state = EObstacleState.ROTATE
+                self.get_logger().info(f"Change of substate: Rotating until obstacle is to the right")
+
 
             # Substate actions
             if self.obstacle_state == EObstacleState.ROTATE:
@@ -320,6 +325,7 @@ class BugDeploy(Node):
                 rotation_factor = distance_to_wall / SAFETY_MARGIN  # Negative == Too close. Positive == Too far away
                 cmd.angular.z = -1 * 0.2 * rotation_factor * W_MAX
 
+        self.get_logger().info(f"Publishing Twist command with linear: {cmd.linear.x}, angular: {cmd.angular.z}")
         self.cmd_pub.publish(cmd)
 
 
