@@ -30,6 +30,7 @@ from rclpy.qos import qos_profile_sensor_data
 
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
+from leo_msgs.msg import WheelOdom
 from geometry_msgs.msg import Twist
 
 from enum import Enum
@@ -115,10 +116,10 @@ class BugDeploy(Node):
         # this rover, e.g.
         #   -p odom_topic:=/merged_odom -p cmd_vel_topic:=/rob_1/cmd_vel
         self.declare_parameter("scan_topic", "/scan")
-        self.declare_parameter("odom_topic", "/odom")
-        self.declare_parameter("cmd_vel_topic", "/cmd_vel")
+        self.declare_parameter("odom_topic", "/rob_1/firmware/wheel_odom")
+        self.declare_parameter("cmd_vel_topic", "/rob_1/cmd_vel")
         # When true, log the resampled forward/left/right beams each step so you
-        # can verify lidar_yaw_offset and spin handedness before driving.
+	        # can verify lidar_yaw_offset and spin handedness before driving.
         self.declare_parameter("debug", False)
         self.debug = bool(self.get_parameter("debug").value)
 
@@ -146,7 +147,7 @@ class BugDeploy(Node):
         )
         self.cmd_pub = self.create_publisher(Twist, cmd_vel_topic, 10)
         self.create_subscription(LaserScan, scan_topic, self._on_scan, qos_profile_sensor_data)
-        self.create_subscription(Odometry, odom_topic, self._on_odom, 10)
+        self.create_subscription(WheelOdom, odom_topic, self._on_odom, qos_profile_sensor_data)
         self.create_timer(1.0 / CONTROL_HZ, self._control_step)
 
         self.state = EState.CHASE_GOAL
@@ -185,6 +186,7 @@ class BugDeploy(Node):
         self._scan_stamp = self.get_clock().now()
 
     def _on_odom(self, msg: Odometry):
+        self.get_logger().info(f"{msg}")
         p = msg.pose.pose.position
         yaw = yaw_from_quat(msg.pose.pose.orientation)
         self._pose = (p.x, p.y, yaw)
