@@ -13,3 +13,9 @@ log/
 src/leo_pybullet/results/
 *.pdf
 *.gv
+
+# Automatically generated Bullet maps
+src/leo_pybullet/worlds/map_seed_*.yaml
+src/leo_pybullet/worlds/map_seed_*.meta.json
+src/leo_pybullet/worlds/map_seed_*.svg
+src/leo_pybullet/worlds/benchmark_*/
