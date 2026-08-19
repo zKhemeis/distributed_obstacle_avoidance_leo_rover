@@ -6,6 +6,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+find_package(pybind11 REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -29,6 +32,16 @@ target_link_libraries(bullet_sim_core
   PRIVATE
     ${BULLET_LIBRARIES}
     yaml-cpp
+)
+
+pybind11_add_module(leo_bullet_sim MODULE src/python_bindings.cpp)
+target_compile_features(leo_bullet_sim PUBLIC cxx_std_17)
+target_link_libraries(leo_bullet_sim PRIVATE bullet_sim_core)
+
+ament_get_python_install_dir(PYTHON_INSTALL_DIR)
+ament_python_install_package(${PROJECT_NAME})
+install(TARGETS leo_bullet_sim
+  LIBRARY DESTINATION ${PYTHON_INSTALL_DIR}
 )
 
 add_executable(pybullet_sim_node src/pybullet_sim_node.cpp)
@@ -63,6 +76,11 @@ install(TARGETS
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+install(PROGRAMS
+  scripts/bullet_python_smoke.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY
