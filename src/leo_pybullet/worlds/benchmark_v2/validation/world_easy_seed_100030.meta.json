@@ -1,0 +1,23 @@
+{
+  "astar_path_length_m": 5.2398,
+  "boundary_wall_count": 4,
+  "difficulty": "easy",
+  "direct_path_blocked": false,
+  "generation_attempt": 1,
+  "goal": {
+    "exclusion_radius": 0.55,
+    "x": 3.096345,
+    "y": 0.821339
+  },
+  "random_obstacle_count": 2,
+  "robot_inflation_radius_m": 0.4159,
+  "seed": 100030,
+  "start": {
+    "exclusion_radius": 0.6,
+    "x": -1.035729,
+    "y": -1.921924,
+    "yaw": -2.750925
+  },
+  "total_box_count": 6,
+  "world_file": "/root/leo_ws/src/leo_pybullet/worlds/benchmark_v2/validation/world_easy_seed_100030.yaml"
+}
