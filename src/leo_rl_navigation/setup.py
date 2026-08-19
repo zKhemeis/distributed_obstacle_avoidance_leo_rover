@@ -11,11 +11,11 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'numpy', 'gymnasium'],
     zip_safe=True,
     maintainer='root',
     maintainer_email='khemeis.zribi@stud.tu-darmstadt.de',
-    description='TODO: Package description',
+    description='Headless Gymnasium navigation environment for the Leo Rover.',
     license='Apache-2.0',
     extras_require={
         'test': [
@@ -24,6 +24,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
+            'leo_rl_env_smoke = leo_rl_navigation.env_smoke:main',
         ],
     },
 )
