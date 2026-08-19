@@ -1,0 +1,6 @@
+lidar_range_calibration_node:
+  ros__parameters:
+    center_angle_deg: 0.0
+    sector_half_width_deg: 3.0
+    sample_scans: 30
+    reference_distance_m: 2.0

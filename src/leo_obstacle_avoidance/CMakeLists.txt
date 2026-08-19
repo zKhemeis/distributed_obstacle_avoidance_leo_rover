@@ -24,7 +24,16 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 add_executable(simple_lidar_avoidance_node src/simple_lidar_avoidance_node.cpp)
+add_executable(
+  lidar_range_calibration_node
+  src/lidar_range_calibration_node.cpp
+)
 
+ament_target_dependencies(
+  lidar_range_calibration_node
+  rclcpp
+  sensor_msgs
+)
 ament_target_dependencies(simple_lidar_avoidance_node
   rclcpp
   sensor_msgs
@@ -34,6 +43,13 @@ ament_target_dependencies(simple_lidar_avoidance_node
 
 install(TARGETS
   simple_lidar_avoidance_node
+  lidar_range_calibration_node
   DESTINATION lib/${PROJECT_NAME}
+)
+install(
+  DIRECTORY
+    config
+    launch
+  DESTINATION share/${PROJECT_NAME}
 )
 ament_package()

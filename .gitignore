@@ -19,3 +19,27 @@ src/leo_pybullet/worlds/map_seed_*.yaml
 src/leo_pybullet/worlds/map_seed_*.meta.json
 src/leo_pybullet/worlds/map_seed_*.svg
 src/leo_pybullet/worlds/benchmark_*/
+# Python environments
+.venv_rl/
+.venv/
+__pycache__/
+*.pyc
+
+# Experiment output
+results/
+tb_logs/
+models/
+
+# ROS bags
+*.db3
+*.mcap
+
+# Editor temporary files
+*.swp
+*~
+
+# Generated archives
+src/leo_pybullet/leo_stage1_map_tools.zip
+
+# Temporary generated maps
+src/leo_pybullet/worlds/generated_*

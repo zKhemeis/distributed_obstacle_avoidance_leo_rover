@@ -1,0 +1,8 @@
+obstacles:
+  - name: calibration_wall
+    x: 2.2
+    y: 0.0
+    z: 0.5
+    size_x: 0.2
+    size_y: 2.0
+    size_z: 1.0

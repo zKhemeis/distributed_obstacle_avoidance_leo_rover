@@ -1,0 +1,62 @@
+# Edit these dimensions to match the usable floor in your Bullet world.
+arena:
+  x_min: -5.0
+  x_max: 5.0
+  y_min: -5.0
+  y_max: 5.0
+  boundary_margin: 0.10
+
+# The Bullet simulator currently has an infinite ground plane. These four boxes
+# keep the rover inside the benchmark area. Set enabled: false if your base
+# world already creates physical walls.
+boundary_walls:
+  enabled: true
+  thickness: 0.12
+  height: 0.45
+# Start and goal are used by the generator and the path validator.
+# Your current C++ world loader ignores them; the future policy/evaluator will use them.
+
+start:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  exclusion_radius: 0.60
+goal:
+  x: 2.0
+  y: 0.0
+  exclusion_radius: 0.55
+# Conservative Leo footprint used only for checking whether a path exists.
+# It is approximated by a circle with half-diagonal + safety_margin.
+robot:
+  length: 0.47
+  width: 0.48
+  safety_margin: 0.08
+
+planner:
+  resolution: 0.08
+  allow_diagonal: true
+
+generation:
+  inter_obstacle_gap: 0.10
+  max_placement_attempts: 2000
+  max_world_attempts: 250
+
+difficulties:
+  easy:
+    obstacle_count: [2, 4]
+    size_x: [0.25, 0.55]
+    size_y: [0.25, 0.55]
+    size_z: [0.25, 0.65]
+    direct_block_probability: 0.15
+  medium:
+    obstacle_count: [5, 8]
+    size_x: [0.25, 0.75]
+    size_y: [0.25, 0.70]
+    size_z: [0.25, 0.80]
+    direct_block_probability: 0.55
+  hard:
+    obstacle_count: [8, 12]
+    size_x: [0.25, 0.90]
+    size_y: [0.25, 0.80]
+    size_z: [0.25, 0.90]
+    direct_block_probability: 0.85

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+<rect width="100%" height="100%" fill="#f7f7f7" stroke="#222" stroke-width="3"/>
+<rect x="-53.59" y="-41.59" width="95.18" height="1083.18" fill="#e45756" opacity="0.18"/>
+<rect x="-12.00" y="0.00" width="12.00" height="1000.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="-6.00" y="500.00" text-anchor="middle" font-size="12" fill="white">boundary_left</text>
+<rect x="958.41" y="-41.59" width="95.18" height="1083.18" fill="#e45756" opacity="0.18"/>
+<rect x="1000.00" y="0.00" width="12.00" height="1000.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="1006.00" y="500.00" text-anchor="middle" font-size="12" fill="white">boundary_right</text>
+<rect x="-41.59" y="958.41" width="1083.18" height="95.18" fill="#e45756" opacity="0.18"/>
+<rect x="0.00" y="1000.00" width="1000.00" height="12.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="500.00" y="1006.00" text-anchor="middle" font-size="12" fill="white">boundary_bottom</text>
+<rect x="-41.59" y="-53.59" width="1083.18" height="95.18" fill="#e45756" opacity="0.18"/>
+<rect x="0.00" y="-12.00" width="1000.00" height="12.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="500.00" y="-6.00" text-anchor="middle" font-size="12" fill="white">boundary_top</text>
+<polyline points="496.00,504.00 504.00,504.00 512.00,504.00 520.00,504.00 528.00,504.00 536.00,504.00 544.00,504.00 552.00,504.00 560.00,504.00 568.00,504.00 576.00,504.00 584.00,504.00 592.00,504.00 600.00,504.00 608.00,504.00 616.00,504.00 624.00,504.00 632.00,504.00 640.00,504.00 648.00,504.00 656.00,504.00 664.00,504.00 672.00,504.00 680.00,504.00 688.00,504.00 696.00,504.00 704.00,504.00" fill="none" stroke="#3366cc" stroke-width="4"/>
+<circle cx="500.00" cy="500.00" r="10" fill="#2ca02c" stroke="#222" stroke-width="2"/>
+<text x="514.00" y="488.00" font-size="18" fill="#222">start</text>
+<circle cx="700.00" cy="500.00" r="10" fill="#ffbf00" stroke="#222" stroke-width="2"/>
+<text x="714.00" y="488.00" font-size="18" fill="#222">goal</text>
+</svg>
