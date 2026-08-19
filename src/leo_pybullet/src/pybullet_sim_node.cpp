@@ -1,43 +1,23 @@
 #include <chrono>
+#include <cstddef>
 #include <cmath>
-#include <limits>
+#include <exception>
+#include <functional>
 #include <memory>
-#include <vector>
-#include <array>
-#include "yaml-cpp/yaml.h"
 #include <string>
+#include <vector>
 
-#include "rclcpp/rclcpp.hpp"
-#include "geometry_msgs/msg/twist.hpp"
-#include "sensor_msgs/msg/laser_scan.hpp"
-#include "visualization_msgs/msg/marker_array.hpp"
-
-#include "btBulletDynamicsCommon.h"
-#include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
-#include "tf2_ros/transform_broadcaster.h"
+#include "geometry_msgs/msg/twist.hpp"
+#include "leo_pybullet/bullet_sim_core.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 #include "tf2_ros/static_transform_broadcaster.h"
-
-struct Wheel
-{
-  btRigidBody * body = nullptr;
-  btHingeConstraint * hinge = nullptr;
-  bool left_side = true;
-  double target_velocity = 0.0;
-};
-
-struct BoxObstacle
-{
-  std::string name;
-  double x;
-  double y;
-  double z;
-  double size_x;
-  double size_y;
-  double size_z;
-};
+#include "tf2_ros/transform_broadcaster.h"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 class LeoPybulletSimNode : public rclcpp::Node
 {
@@ -45,261 +25,64 @@ public:
   LeoPybulletSimNode()
   : Node("leo_pybullet_sim_node")
   {
-    cmd_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
+    cmd_sub_ = create_subscription<geometry_msgs::msg::Twist>(
       "/cmd_vel", 10,
-      std::bind(&LeoPybulletSimNode::cmdCallback, this, std::placeholders::_1)
-    );
+      [this](const geometry_msgs::msg::Twist::SharedPtr message) {
+        core_.setCommand(message->linear.x, message->angular.z);
+      });
 
-    scan_pub_ = this->create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
-    odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
-    imu_pub_ = this->create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", 10);
-    marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("/pybullet_markers", 10);
+    scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>("/scan", 10);
+    odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", 10);
+    marker_pub_ =
+      create_publisher<visualization_msgs::msg::MarkerArray>("/pybullet_markers", 10);
+    joint_state_pub_ = create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     static_tf_broadcaster_ =
-  std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
+      std::make_unique<tf2_ros::StaticTransformBroadcaster>(*this);
 
-publishStaticTransforms();
-    joint_state_pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
-    std::string world_file =
-      this->declare_parameter<std::string>(
-        "world",
-        "boxes"
-      );
-
+    std::string world_file = declare_parameter<std::string>("world", "boxes");
     if (world_file == "boxes") {
       world_file = "/root/leo_ws/src/leo_pybullet/worlds/boxes_world.yaml";
     } else if (world_file == "empty") {
       world_file = "/root/leo_ws/src/leo_pybullet/worlds/empty_world.yaml";
     }
 
-    loadWorldFromYaml(world_file);
-    initBulletWorld();
+    try {
+      core_.reset(world_file);
+    } catch (const std::exception & error) {
+      RCLCPP_FATAL(get_logger(), "Failed to initialize Bullet world: %s", error.what());
+      throw;
+    }
 
-    timer_ = this->create_wall_timer(
-      std::chrono::duration<double>(1.0 / physics_rate_),
-      std::bind(&LeoPybulletSimNode::stepSimulation, this)
-    );
-
+    publishStaticTransforms();
     start_wall_time_ = std::chrono::steady_clock::now();
+    timer_ = create_wall_timer(
+      std::chrono::duration<double>(1.0 / leo_pybullet::BulletSimCore::kPhysicsRate),
+      std::bind(&LeoPybulletSimNode::stepSimulation, this));
 
-    RCLCPP_INFO(this->get_logger(), "Bullet simulator with physical wheel motors started");
-  }
-
-  ~LeoPybulletSimNode()
-  {
-    for (auto constraint : constraints_) {
-      dynamics_world_->removeConstraint(constraint);
-      delete constraint;
-    }
-
-    for (auto body : rigid_bodies_) {
-      dynamics_world_->removeRigidBody(body);
-      delete body->getMotionState();
-      delete body;
-    }
-
-    for (auto shape : collision_shapes_) {
-      delete shape;
-    }
-
-    delete dynamics_world_;
-    delete solver_;
-    delete dispatcher_;
-    delete collision_config_;
-    delete broadphase_;
+    RCLCPP_INFO(
+      get_logger(), "Loaded %zu obstacles from %s",
+      core_.obstacles().size(), world_file.c_str());
+    RCLCPP_INFO(get_logger(), "Bullet simulator with reusable physics core started");
   }
 
 private:
-  void cmdCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
+  static geometry_msgs::msg::Quaternion quaternionOf(
+    const leo_pybullet::Transform3D & transform)
   {
-    linear_velocity_ = msg->linear.x;
-    angular_velocity_ = msg->angular.z;
-  }
-
-  btRigidBody * createRigidBody(
-    double mass,
-    const btTransform & transform,
-    btCollisionShape * shape)
-  {
-    btVector3 local_inertia(0, 0, 0);
-
-    if (mass > 0.0) {
-      shape->calculateLocalInertia(mass, local_inertia);
-    }
-
-    auto * motion_state = new btDefaultMotionState(transform);
-
-    btRigidBody::btRigidBodyConstructionInfo rb_info(
-      mass, motion_state, shape, local_inertia
-    );
-
-    auto * body = new btRigidBody(rb_info);
-    dynamics_world_->addRigidBody(body);
-
-    rigid_bodies_.push_back(body);
-    collision_shapes_.push_back(shape);
-
-    return body;
-  }
-  void loadWorldFromYaml(const std::string & world_file)
-  {
-    obstacles_.clear();
-
-    try {
-      YAML::Node config = YAML::LoadFile(world_file);
-
-      if (!config["obstacles"]) {
-        RCLCPP_WARN(this->get_logger(), "No obstacles found in world file: %s",
-        world_file.c_str());
-        return;
-      }
-
-      for (const auto & obs : config["obstacles"]) {
-        BoxObstacle box;
-        box.name = obs["name"].as<std::string>();
-        box.x = obs["x"].as<double>();  
-        box.y = obs["y"].as<double>();
-        box.z = obs["z"].as<double>();
-        box.size_x = obs["size_x"].as<double>();
-        box.size_y = obs["size_y"].as<double>();
-        box.size_z = obs["size_z"].as<double>();
-
-        obstacles_.push_back(box);
-      }
-
-      RCLCPP_INFO(this->get_logger(), "Loaded %zu obstacles from %s", obstacles_.size(),
-      world_file.c_str());
-    } catch (const std::exception & e) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to load world file: %s", e.what());
-    }
-  }
-  void initBulletWorld()
-  {
-    broadphase_ = new btDbvtBroadphase();
-    collision_config_ = new btDefaultCollisionConfiguration();
-    dispatcher_ = new btCollisionDispatcher(collision_config_);
-    solver_ = new btSequentialImpulseConstraintSolver();
-
-    dynamics_world_ = new btDiscreteDynamicsWorld(
-      dispatcher_,
-      broadphase_,
-      solver_,
-      collision_config_
-    );
-
-    dynamics_world_->setGravity(btVector3(0, 0, -9.81));
-
-    auto * ground_shape = new btStaticPlaneShape(btVector3(0, 0, 1), 0);
-    btTransform ground_tf;
-    ground_tf.setIdentity();
-    createRigidBody(0.0, ground_tf, ground_shape);
-
-    createRobot();
-    for (const auto & box : obstacles_) {
-      addBoxObstacle(box.x, box.y, box.z, box.size_x, box.size_y, box.size_z);
-    }
-    //addBoxObstacle(2.0, 0.0, 0.25, 0.5, 0.5, 0.5);
-    //addBoxObstacle(3.0, 1.0, 0.25, 0.6, 0.6, 0.5);
-    //addBoxObstacle(4.0, -1.0, 0.25, 0.6, 0.6, 0.5);
-    //addBoxObstacle(5.0, 0.0, 0.25, 0.8, 0.8, 0.5);
-  }
-
-  void createRobot()
-  {
-    auto * chassis_shape = new btBoxShape(btVector3(0.21, 0.14, 0.07));
-
-    btTransform chassis_tf;
-    chassis_tf.setIdentity();
-    chassis_tf.setOrigin(btVector3(0, 0, 0.17));
-
-    robot_body_ = createRigidBody(4.36, chassis_tf, chassis_shape);
-    robot_body_->setActivationState(DISABLE_DEACTIVATION);
-    robot_body_->setFriction(1.0);
-    robot_body_->setDamping(0.05, 0.2);
-
-    // Keep the rover mostly planar to avoid unrealistic flipping during this first wheel test.
-    robot_body_->setAngularFactor(btVector3(0.0, 0.0, 1.0));
-
-    addWheel(-0.15256,  0.224, true);   // FL
-    addWheel( 0.15256,  0.224, true);   // RL
-    addWheel( 0.15256, -0.224, false);  // FR
-    addWheel(-0.15256, -0.224, false);  // RR
-  }
-
-  void addWheel(double local_x, double local_y, bool left_side)
-  {
-    const double wheel_radius = 0.0625;
-    const double wheel_width = 0.07;
-
-    auto * wheel_shape = new btCylinderShape(
-      btVector3(wheel_radius, wheel_width / 2.0, wheel_radius)
-    );
-
-    btTransform chassis_tf;
-    robot_body_->getMotionState()->getWorldTransform(chassis_tf);
-    const btVector3 chassis_pos = chassis_tf.getOrigin();
-
-    btTransform wheel_tf;
-    wheel_tf.setIdentity();
-    wheel_tf.setOrigin(
-      chassis_pos + btVector3(local_x, local_y, -0.10)
-    );
-
-    auto * wheel_body = createRigidBody(0.283642, wheel_tf, wheel_shape);
-    wheel_body->setActivationState(DISABLE_DEACTIVATION);
-    wheel_body->setFriction(2.0);
-    wheel_body->setRollingFriction(0.02);
-    wheel_body->setDamping(0.01, 0.01);
-
-    btVector3 pivot_in_chassis(local_x, local_y, -0.1175);
-    btVector3 pivot_in_wheel(0, 0, 0);
-
-    btVector3 axis_in_chassis(0, 1, 0);
-    btVector3 axis_in_wheel(0, 1, 0);
-
-    auto * hinge = new btHingeConstraint(
-      *robot_body_,
-      *wheel_body,
-      pivot_in_chassis,
-      pivot_in_wheel,
-      axis_in_chassis,
-      axis_in_wheel,
-      true
-    );
-
-    hinge->setLimit(1.0, -1.0);
-    hinge->enableAngularMotor(true, 0.0, motor_max_impulse_);
-
-    dynamics_world_->addConstraint(hinge, true);
-    constraints_.push_back(hinge);
-
-    wheels_.push_back({wheel_body, hinge, left_side});
-  }
-
-  void addBoxObstacle(double x, double y, double z, double sx, double sy, double sz)
-  {
-    auto * shape = new btBoxShape(btVector3(sx / 2.0, sy / 2.0, sz / 2.0));
-
-    btTransform tf;
-    tf.setIdentity();
-    tf.setOrigin(btVector3(x, y, z));
-
-    auto * body = createRigidBody(0.0, tf, shape);
-    body->setFriction(1.0);
+    geometry_msgs::msg::Quaternion quaternion;
+    quaternion.x = transform.qx;
+    quaternion.y = transform.qy;
+    quaternion.z = transform.qz;
+    quaternion.w = transform.qw;
+    return quaternion;
   }
 
   void stepSimulation()
   {
-    const double dt = 1.0 / physics_rate_;
-
-    applyWheelMotorCommands();
-
-    dynamics_world_->stepSimulation(dt, 1, dt);
-
-    sim_time_ += dt;
-    step_count_++;
-
-    if (step_count_ % scan_publish_every_n_steps_ == 0) {
+    core_.step();
+    if (core_.stepCount() % leo_pybullet::BulletSimCore::kControlPhysicsSteps == 0) {
       publishRaycastScan();
       publishMarkers();
       publishOdom();
@@ -307,392 +90,234 @@ private:
       publishJointStates();
     }
 
-    if (step_count_ % static_cast<int>(physics_rate_) == 0) {
+    const auto physics_rate =
+      static_cast<std::size_t>(leo_pybullet::BulletSimCore::kPhysicsRate);
+    if (core_.stepCount() % physics_rate == 0) {
       printStatus();
     }
   }
 
-  void applyWheelMotorCommands()
-  {
-    const double left_linear =
-      linear_velocity_ - angular_velocity_ * track_width_ / 2.0;
-
-    const double right_linear =
-      linear_velocity_ + angular_velocity_ * track_width_ / 2.0;
-
-    const double left_wheel_speed =  left_linear / wheel_radius_;
-    const double right_wheel_speed = right_linear / wheel_radius_;
-
-const double dt = 1.0 / physics_rate_;
-
-for (size_t i = 0; i < wheels_.size(); ++i) {
-  auto & wheel = wheels_[i];
-
-  const double target_speed =
-    wheel.left_side ? left_wheel_speed : right_wheel_speed;
-
-  wheel.target_velocity = target_speed;
-  wheel_positions_[i] += target_speed * dt;
-
-  wheel.hinge->enableAngularMotor(true, target_speed, motor_max_impulse_);
-}    
-  }
-
-  double getYaw(const btTransform & tf) const
-  {
-    btScalar roll;
-    btScalar pitch;
-    btScalar yaw;
-    tf.getBasis().getEulerYPR(yaw, pitch, roll);
-    return static_cast<double>(yaw);
-  }
-
   void publishRaycastScan()
   {
+    const auto data = core_.laserScan();
     sensor_msgs::msg::LaserScan scan;
-
-    scan.header.stamp = this->now();
+    scan.header.stamp = now();
     scan.header.frame_id = "base_scan";
-
-    scan.angle_min = 0.0;
-    scan.angle_max = 2.0 * M_PI;
-    const int number_of_rays = 500;
-
-    scan.angle_increment =
-        (scan.angle_max - scan.angle_min) /
-        static_cast<double>(number_of_rays);
-    scan.range_min = 0.05;
-    scan.range_max = 12.0;
-
-    scan.scan_time = 0.1;
-    scan.time_increment = scan.scan_time / number_of_rays;
-
-    scan.ranges.assign(
-        number_of_rays,
-        std::numeric_limits<float>::infinity());
-
-    scan.intensities.assign(number_of_rays, 0.0);
-
-    btTransform robot_tf;
-    robot_body_->getMotionState()->getWorldTransform(robot_tf);
-
-    const btVector3 robot_pos = robot_tf.getOrigin();
-    const double yaw = getYaw(robot_tf);
-
-    const double lidar_x = 0.10;
-    const double lidar_y = 0.0;
-    const double lidar_z = 0.08;
-
-    const double lidar_world_x =
-      robot_pos.x() + std::cos(yaw) * lidar_x - std::sin(yaw) * lidar_y;
-    const double lidar_world_y =
-      robot_pos.y() + std::sin(yaw) * lidar_x + std::cos(yaw) * lidar_y;
-    const double lidar_world_z = robot_pos.z() + lidar_z;
-
-    for (int i = 0; i < number_of_rays; ++i) {
-      const double local_angle = scan.angle_min + i * scan.angle_increment;
-      const double global_angle = yaw + local_angle;
-
-      const double ray_start_offset = 0.08;
-
-      const btVector3 ray_from(
-        lidar_world_x + ray_start_offset * std::cos(global_angle),
-        lidar_world_y + ray_start_offset * std::sin(global_angle),
-        lidar_world_z
-      );
-
-      const btVector3 ray_to(
-        lidar_world_x + scan.range_max * std::cos(global_angle),
-        lidar_world_y + scan.range_max * std::sin(global_angle),
-        lidar_world_z
-      );
-
-      btCollisionWorld::ClosestRayResultCallback ray_callback(ray_from, ray_to);
-      ray_callback.m_collisionFilterGroup = btBroadphaseProxy::SensorTrigger;
-      dynamics_world_->rayTest(ray_from, ray_to, ray_callback);
-
-      if (ray_callback.hasHit()) {
-        const double distance =
-          ray_start_offset +
-          (scan.range_max - ray_start_offset) * ray_callback.m_closestHitFraction;
-
-        if (distance >= scan.range_min && distance <= scan.range_max) {
-          scan.ranges[i] = static_cast<float>(distance);
-        } else {
-          scan.ranges[i] = std::numeric_limits<float>::infinity();
-        }
-      } else {
-        scan.ranges[i] = std::numeric_limits<float>::infinity();
-      }
-    }
-
+    scan.angle_min = static_cast<float>(data.angle_min);
+    scan.angle_max = static_cast<float>(data.angle_max);
+    scan.angle_increment = static_cast<float>(data.angle_increment);
+    scan.range_min = static_cast<float>(data.range_min);
+    scan.range_max = static_cast<float>(data.range_max);
+    scan.scan_time = static_cast<float>(data.scan_time);
+    scan.time_increment =
+      static_cast<float>(data.scan_time / static_cast<double>(data.ranges.size()));
+    scan.ranges = data.ranges;
+    scan.intensities.assign(data.ranges.size(), 0.0F);
     scan_pub_->publish(scan);
   }
 
   void publishMarkers()
   {
     visualization_msgs::msg::MarkerArray markers;
-
-    auto makeQuat = [](const btQuaternion & q_bt) {
-      geometry_msgs::msg::Quaternion q;
-      q.x = q_bt.x();
-      q.y = q_bt.y();
-      q.z = q_bt.z();
-      q.w = q_bt.w();
-      return q;
-    };
-
-    btTransform chassis_tf;
-    robot_body_->getMotionState()->getWorldTransform(chassis_tf);
+    const auto stamp = now();
+    const auto robot = core_.robotState();
 
     visualization_msgs::msg::Marker chassis;
     chassis.header.frame_id = "map";
-    chassis.header.stamp = this->now();
+    chassis.header.stamp = stamp;
     chassis.ns = "leo_robot";
     chassis.id = 0;
     chassis.type = visualization_msgs::msg::Marker::CUBE;
     chassis.action = visualization_msgs::msg::Marker::ADD;
-    chassis.pose.position.x = chassis_tf.getOrigin().x();
-    chassis.pose.position.y = chassis_tf.getOrigin().y();
-    chassis.pose.position.z = chassis_tf.getOrigin().z();
-    chassis.pose.orientation = makeQuat(chassis_tf.getRotation());
+    chassis.pose.position.x = robot.transform.x;
+    chassis.pose.position.y = robot.transform.y;
+    chassis.pose.position.z = robot.transform.z;
+    chassis.pose.orientation = quaternionOf(robot.transform);
     chassis.scale.x = 0.50;
     chassis.scale.y = 0.36;
     chassis.scale.z = 0.16;
-    chassis.color.r = 0.1;
-    chassis.color.g = 0.4;
-    chassis.color.b = 1.0;
-    chassis.color.a = 1.0;
+    chassis.color.r = 0.1F;
+    chassis.color.g = 0.4F;
+    chassis.color.b = 1.0F;
+    chassis.color.a = 1.0F;
     markers.markers.push_back(chassis);
 
-    int id = 1;
-    for (const auto & wheel : wheels_) {
-      btTransform wheel_tf;
-      wheel.body->getMotionState()->getWorldTransform(wheel_tf);
-
+    const auto wheels = core_.wheelStates();
+    int marker_id = 1;
+    for (const auto & wheel : wheels) {
       visualization_msgs::msg::Marker marker;
       marker.header.frame_id = "map";
-      marker.header.stamp = this->now();
+      marker.header.stamp = stamp;
       marker.ns = "leo_robot";
-      marker.id = id++;
+      marker.id = marker_id++;
       marker.type = visualization_msgs::msg::Marker::CYLINDER;
       marker.action = visualization_msgs::msg::Marker::ADD;
-      marker.pose.position.x = wheel_tf.getOrigin().x();
-      marker.pose.position.y = wheel_tf.getOrigin().y();
-      marker.pose.position.z = wheel_tf.getOrigin().z();
-      btQuaternion wheel_marker_rotation =
-        wheel_tf.getRotation() * btQuaternion(btVector3(1, 0, 0), M_PI / 2.0);
+      marker.pose.position.x = wheel.transform.x;
+      marker.pose.position.y = wheel.transform.y;
+      marker.pose.position.z = wheel.transform.z;
 
-      marker.pose.orientation = makeQuat(wheel_marker_rotation);
+      // The physical wheel cylinder is aligned with Y. RViz's cylinder axis is Z,
+      // so rotate the core orientation by +90 degrees about X.
+      const double half_angle = M_PI / 4.0;
+      const double rx = std::sin(half_angle);
+      const double rw = std::cos(half_angle);
+      marker.pose.orientation.x = wheel.transform.qw * rx + wheel.transform.qx * rw;
+      marker.pose.orientation.y = wheel.transform.qy * rw + wheel.transform.qz * rx;
+      marker.pose.orientation.z = wheel.transform.qz * rw - wheel.transform.qy * rx;
+      marker.pose.orientation.w = wheel.transform.qw * rw - wheel.transform.qx * rx;
       marker.scale.x = 0.125;
       marker.scale.y = 0.125;
       marker.scale.z = 0.07;
-      marker.color.r = 0.02;
-      marker.color.g = 0.02;
-      marker.color.b = 0.02;
-      marker.color.a = 1.0;
+      marker.color.r = 0.02F;
+      marker.color.g = 0.02F;
+      marker.color.b = 0.02F;
+      marker.color.a = 1.0F;
       markers.markers.push_back(marker);
     }
 
-    int box_id = 100;
-
-for (const auto & box : obstacles_) {
-
-  visualization_msgs::msg::Marker marker;
-
-  marker.header.frame_id = "map";
-  marker.header.stamp = this->now();
-  marker.ns = "obstacles";
-  marker.id = box_id++;
-
-  marker.type = visualization_msgs::msg::Marker::CUBE;
-  marker.action = visualization_msgs::msg::Marker::ADD;
-
-  marker.pose.position.x = box.x;
-  marker.pose.position.y = box.y;
-  marker.pose.position.z = box.z;
-
-  marker.pose.orientation.x = 0.0;
-  marker.pose.orientation.y = 0.0;
-  marker.pose.orientation.z = 0.0;
-  marker.pose.orientation.w = 1.0;
-
-  marker.scale.x = box.size_x;
-  marker.scale.y = box.size_y;
-  marker.scale.z = box.size_z;
-
-  marker.color.r = 1.0;
-  marker.color.g = 0.2;
-  marker.color.b = 0.1;
-  marker.color.a = 1.0;
-
-  markers.markers.push_back(marker);
-}
-    
-
+    marker_id = 100;
+    for (const auto & obstacle : core_.obstacles()) {
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = stamp;
+      marker.ns = "obstacles";
+      marker.id = marker_id++;
+      marker.type = visualization_msgs::msg::Marker::CUBE;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      marker.pose.position.x = obstacle.x;
+      marker.pose.position.y = obstacle.y;
+      marker.pose.position.z = obstacle.z;
+      marker.pose.orientation.w = 1.0;
+      marker.scale.x = obstacle.size_x;
+      marker.scale.y = obstacle.size_y;
+      marker.scale.z = obstacle.size_z;
+      marker.color.r = 1.0F;
+      marker.color.g = 0.2F;
+      marker.color.b = 0.1F;
+      marker.color.a = 1.0F;
+      markers.markers.push_back(marker);
+    }
     marker_pub_->publish(markers);
   }
+
   void publishOdom()
   {
-    btTransform tf;
-    robot_body_->getMotionState()->getWorldTransform(tf);
-
-    const btVector3 pos = tf.getOrigin();
-    const btQuaternion q = tf.getRotation();
-    const btVector3 lin_vel = robot_body_->getLinearVelocity();
-    const btVector3 ang_vel = robot_body_->getAngularVelocity();
-
+    const auto robot = core_.robotState();
+    const auto stamp = now();
     nav_msgs::msg::Odometry odom;
-    odom.header.stamp = this->now();
+    odom.header.stamp = stamp;
     odom.header.frame_id = "odom";
     odom.child_frame_id = "base_link";
-
-    odom.pose.pose.position.x = pos.x();
-    odom.pose.pose.position.y = pos.y();
-    odom.pose.pose.position.z = pos.z();
-
-    odom.pose.pose.orientation.x = q.x();
-    odom.pose.pose.orientation.y = q.y();
-    odom.pose.pose.orientation.z = q.z();
-    odom.pose.pose.orientation.w = q.w();
-
-    odom.twist.twist.linear.x = lin_vel.x();
-    odom.twist.twist.linear.y = lin_vel.y();
-    odom.twist.twist.linear.z = lin_vel.z();
-
-    odom.twist.twist.angular.x = ang_vel.x();
-    odom.twist.twist.angular.y = ang_vel.y();
-    odom.twist.twist.angular.z = ang_vel.z();
-
+    odom.pose.pose.position.x = robot.transform.x;
+    odom.pose.pose.position.y = robot.transform.y;
+    odom.pose.pose.position.z = robot.transform.z;
+    odom.pose.pose.orientation = quaternionOf(robot.transform);
+    odom.twist.twist.linear.x = robot.linear_velocity.x;
+    odom.twist.twist.linear.y = robot.linear_velocity.y;
+    odom.twist.twist.linear.z = robot.linear_velocity.z;
+    odom.twist.twist.angular.x = robot.angular_velocity.x;
+    odom.twist.twist.angular.y = robot.angular_velocity.y;
+    odom.twist.twist.angular.z = robot.angular_velocity.z;
     odom_pub_->publish(odom);
-    geometry_msgs::msg::TransformStamped tf_msg;
-    tf_msg.header.stamp = odom.header.stamp;
-    tf_msg.header.frame_id = "odom";
-    tf_msg.child_frame_id = "base_link";
 
-    tf_msg.transform.translation.x = pos.x();
-    tf_msg.transform.translation.y = pos.y();
-    tf_msg.transform.translation.z = pos.z();
-
-    tf_msg.transform.rotation.x = q.x();
-    tf_msg.transform.rotation.y = q.y();
-    tf_msg.transform.rotation.z = q.z();
-    tf_msg.transform.rotation.w = q.w();
-
-    tf_broadcaster_->sendTransform(tf_msg);
-  }
-void publishImu()
-{
-  btTransform tf;
-  robot_body_->getMotionState()->getWorldTransform(tf);
-
-  const btQuaternion q = tf.getRotation();
-  const btVector3 angular_velocity = robot_body_->getAngularVelocity();
-  const btVector3 linear_velocity = robot_body_->getLinearVelocity();
-
-  const double dt = 1.0 / 10.0;
-
-  btVector3 linear_acceleration =
-    (linear_velocity - previous_linear_velocity_) / dt;
-
-  previous_linear_velocity_ = linear_velocity;
-
-  sensor_msgs::msg::Imu imu;
-
-  imu.header.stamp = this->now();
-  imu.header.frame_id = "imu_frame";
-
-  imu.orientation.x = q.x();
-  imu.orientation.y = q.y();
-  imu.orientation.z = q.z();
-  imu.orientation.w = q.w();
-
-  imu.angular_velocity.x = angular_velocity.x();
-  imu.angular_velocity.y = angular_velocity.y();
-  imu.angular_velocity.z = angular_velocity.z();
-
-  imu.linear_acceleration.x = linear_acceleration.x();
-  imu.linear_acceleration.y = linear_acceleration.y();
-  imu.linear_acceleration.z = linear_acceleration.z();
-
-  imu_pub_->publish(imu);
-}  
-void publishJointStates()
-{
-  sensor_msgs::msg::JointState msg;
-
-  msg.header.stamp = this->now();
-
-  msg.name = {
-    "wheel_FL_joint",
-    "wheel_RL_joint",
-    "wheel_FR_joint",
-    "wheel_RR_joint"
-  };
-
-  msg.position.resize(4);
-  msg.velocity.resize(4);
-  msg.effort.resize(4);
-
-  for (size_t i = 0; i < 4; ++i) {
-    msg.position[i] = wheel_positions_[i];
-    msg.velocity[i] = wheels_[i].target_velocity;
-    msg.effort[i] = 0.0;
+    geometry_msgs::msg::TransformStamped transform;
+    transform.header.stamp = stamp;
+    transform.header.frame_id = "odom";
+    transform.child_frame_id = "base_link";
+    transform.transform.translation.x = robot.transform.x;
+    transform.transform.translation.y = robot.transform.y;
+    transform.transform.translation.z = robot.transform.z;
+    transform.transform.rotation = quaternionOf(robot.transform);
+    tf_broadcaster_->sendTransform(transform);
   }
 
-  joint_state_pub_->publish(msg);
-}
-void publishStaticTransforms()
-{
-  std::vector<geometry_msgs::msg::TransformStamped> transforms;
+  void publishImu()
+  {
+    const auto robot = core_.robotState();
+    const double dt =
+      static_cast<double>(leo_pybullet::BulletSimCore::kControlPhysicsSteps) /
+      leo_pybullet::BulletSimCore::kPhysicsRate;
 
-  geometry_msgs::msg::TransformStamped scan_tf;
-  scan_tf.header.stamp = this->now();
-  scan_tf.header.frame_id = "base_link";
-  scan_tf.child_frame_id = "base_scan";
-  scan_tf.transform.translation.x = 0.10;
-  scan_tf.transform.translation.y = 0.0;
-  scan_tf.transform.translation.z = 0.08;
-  scan_tf.transform.rotation.x = 0.0;
-  scan_tf.transform.rotation.y = 0.0;
-  scan_tf.transform.rotation.z = 0.0;
-  scan_tf.transform.rotation.w = 1.0;
-  transforms.push_back(scan_tf);
+    leo_pybullet::Vector3D acceleration;
+    acceleration.x = (robot.linear_velocity.x - previous_linear_velocity_.x) / dt;
+    acceleration.y = (robot.linear_velocity.y - previous_linear_velocity_.y) / dt;
+    acceleration.z = (robot.linear_velocity.z - previous_linear_velocity_.z) / dt;
+    previous_linear_velocity_ = robot.linear_velocity;
 
-  geometry_msgs::msg::TransformStamped imu_tf;
-  imu_tf.header.stamp = this->now();
-  imu_tf.header.frame_id = "base_link";
-  imu_tf.child_frame_id = "imu_frame";
-  imu_tf.transform.translation.x = 0.0628;
-  imu_tf.transform.translation.y = -0.0314;
-  imu_tf.transform.translation.z = -0.0393;
-  imu_tf.transform.rotation.x = 0.0;
-  imu_tf.transform.rotation.y = 0.0;
-  imu_tf.transform.rotation.z = 0.0;
-  imu_tf.transform.rotation.w = 1.0;
-  transforms.push_back(imu_tf);
+    sensor_msgs::msg::Imu imu;
+    imu.header.stamp = now();
+    imu.header.frame_id = "imu_frame";
+    imu.orientation = quaternionOf(robot.transform);
+    imu.angular_velocity.x = robot.angular_velocity.x;
+    imu.angular_velocity.y = robot.angular_velocity.y;
+    imu.angular_velocity.z = robot.angular_velocity.z;
+    imu.linear_acceleration.x = acceleration.x;
+    imu.linear_acceleration.y = acceleration.y;
+    imu.linear_acceleration.z = acceleration.z;
+    imu_pub_->publish(imu);
+  }
 
-  static_tf_broadcaster_->sendTransform(transforms);
-}
+  void publishJointStates()
+  {
+    const auto wheels = core_.wheelStates();
+    sensor_msgs::msg::JointState message;
+    message.header.stamp = now();
+    message.name = {
+      "wheel_FL_joint", "wheel_RL_joint", "wheel_FR_joint", "wheel_RR_joint"};
+    message.position.resize(wheels.size());
+    message.velocity.resize(wheels.size());
+    message.effort.assign(wheels.size(), 0.0);
+    for (std::size_t index = 0; index < wheels.size(); ++index) {
+      message.position[index] = wheels[index].position;
+      message.velocity[index] = wheels[index].target_velocity;
+    }
+    joint_state_pub_->publish(message);
+  }
+
+  void publishStaticTransforms()
+  {
+    const auto stamp = now();
+    std::vector<geometry_msgs::msg::TransformStamped> transforms;
+
+    geometry_msgs::msg::TransformStamped scan_transform;
+    scan_transform.header.stamp = stamp;
+    scan_transform.header.frame_id = "base_link";
+    scan_transform.child_frame_id = "base_scan";
+    scan_transform.transform.translation.x = 0.10;
+    scan_transform.transform.translation.z = 0.08;
+    scan_transform.transform.rotation.w = 1.0;
+    transforms.push_back(scan_transform);
+
+    geometry_msgs::msg::TransformStamped imu_transform;
+    imu_transform.header.stamp = stamp;
+    imu_transform.header.frame_id = "base_link";
+    imu_transform.child_frame_id = "imu_frame";
+    imu_transform.transform.translation.x = 0.0628;
+    imu_transform.transform.translation.y = -0.0314;
+    imu_transform.transform.translation.z = -0.0393;
+    imu_transform.transform.rotation.w = 1.0;
+    transforms.push_back(imu_transform);
+
+    static_tf_broadcaster_->sendTransform(transforms);
+  }
+
   void printStatus()
   {
-    btTransform tf;
-    robot_body_->getMotionState()->getWorldTransform(tf);
-
-    const auto now = std::chrono::steady_clock::now();
+    const auto robot = core_.robotState();
+    const auto wall_now = std::chrono::steady_clock::now();
     const double wall_time =
-      std::chrono::duration<double>(now - start_wall_time_).count();
-
-    const double rtf = sim_time_ / wall_time;
-    const btVector3 pos = tf.getOrigin();
-    const double yaw = getYaw(tf);
-
+      std::chrono::duration<double>(wall_now - start_wall_time_).count();
+    const double rtf = wall_time > 0.0 ? core_.simulationTime() / wall_time : 0.0;
     RCLCPP_INFO(
-      this->get_logger(),
-      "Pose: x=%.3f y=%.3f yaw=%.3f sim_time=%.2f RTF=%.2f",
-      pos.x(), pos.y(), yaw, sim_time_, rtf
-    );
+      get_logger(),
+      "Pose: x=%.3f y=%.3f yaw=%.3f sim_time=%.2f RTF=%.2f collision=%s",
+      robot.transform.x, robot.transform.y, robot.yaw,
+      core_.simulationTime(), rtf, core_.hasCollision() ? "true" : "false");
   }
+
+  leo_pybullet::BulletSimCore core_;
+  leo_pybullet::Vector3D previous_linear_velocity_;
+  std::chrono::steady_clock::time_point start_wall_time_;
 
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_sub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
@@ -703,43 +328,6 @@ void publishStaticTransforms()
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
-  
-  btVector3 previous_linear_velocity_ = btVector3(0, 0, 0); 
-  btBroadphaseInterface * broadphase_ = nullptr;
-  btDefaultCollisionConfiguration * collision_config_ = nullptr;
-  btCollisionDispatcher * dispatcher_ = nullptr;
-  btSequentialImpulseConstraintSolver * solver_ = nullptr;
-  btDiscreteDynamicsWorld * dynamics_world_ = nullptr;
-
-  std::vector<btCollisionShape *> collision_shapes_;
-  std::vector<btRigidBody *> rigid_bodies_;
-  std::vector<btTypedConstraint *> constraints_;
-  std::vector<Wheel> wheels_;
-  std::vector<BoxObstacle> obstacles_;
-
-  btRigidBody * robot_body_ = nullptr;
-
-  const double physics_rate_ = 240.0;
-  const int scan_publish_every_n_steps_ = 24;
-
-  const double wheel_radius_ = 0.0625;
-  const double track_width_ = 0.448;
-  const double motor_max_impulse_ = 5.0; // oringinal 2.0 
-
-  double linear_velocity_ = 0.0;
-  double angular_velocity_ = 0.0;
-
-  double sim_time_ = 0.0;
-  int step_count_ = 0;
-std::array<double,4> wheel_positions_ =
-{
-    0.0,
-    0.0,
-    0.0,
-    0.0
-};  
-
-  std::chrono::steady_clock::time_point start_wall_time_;
 };
 
 int main(int argc, char ** argv)
