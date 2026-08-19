@@ -45,6 +45,7 @@ class LeoRoverEnv(gym.Env):
         goal_reward: float = 20.0,
         collision_penalty: float = 20.0,
         settle_physics_steps: int = CONTROL_PHYSICS_STEPS,
+        sequential_worlds: bool = False,
     ) -> None:
         super().__init__()
 
@@ -72,6 +73,7 @@ class LeoRoverEnv(gym.Env):
         self.goal_reward = float(goal_reward)
         self.collision_penalty = float(collision_penalty)
         self.settle_physics_steps = int(settle_physics_steps)
+        self.sequential_worlds = bool(sequential_worlds)
 
         self._worlds = self._read_manifest()
         self._simulation = BulletSim()
@@ -80,6 +82,7 @@ class LeoRoverEnv(gym.Env):
         self._episode_steps = 0
         self._world_file = ''
         self._manifest_index = -1
+        self._next_world_index = 0
 
         observation_low = np.concatenate((
             np.zeros(self.n_sectors + 1, dtype=np.float32),
@@ -147,6 +150,10 @@ class LeoRoverEnv(gym.Env):
             if index < 0 or index >= len(self._worlds):
                 raise IndexError(
                     f'world_index={index} outside [0, {len(self._worlds)})')
+        elif self.sequential_worlds:
+            index = self._next_world_index
+            self._next_world_index = (
+                self._next_world_index + 1) % len(self._worlds)
         else:
             index = int(self.np_random.integers(len(self._worlds)))
         return index, self._worlds[index]

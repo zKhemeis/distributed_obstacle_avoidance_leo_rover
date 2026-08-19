@@ -1,3 +1,5 @@
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'leo_rl_navigation'
@@ -10,6 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
     ],
     install_requires=['setuptools', 'numpy', 'gymnasium'],
     zip_safe=True,
@@ -25,6 +28,8 @@ setup(
     entry_points={
         'console_scripts': [
             'leo_rl_env_smoke = leo_rl_navigation.env_smoke:main',
+            'leo_rl_train = leo_rl_navigation.train_ppo:main',
+            'leo_rl_evaluate = leo_rl_navigation.evaluate_policy:main',
         ],
     },
 )
