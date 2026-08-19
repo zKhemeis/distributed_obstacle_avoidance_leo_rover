@@ -83,11 +83,11 @@ def main() -> None:
                     "total_box_count": metadata["total_box_count"],
                     "direct_path_blocked": metadata["direct_path_blocked"],
                     "astar_path_length_m": metadata["astar_path_length_m"],
-                    "start_x": config["start"]["x"],
-                    "start_y": config["start"]["y"],
-                    "start_yaw": config["start"]["yaw"],
-                    "goal_x": config["goal"]["x"],
-                    "goal_y": config["goal"]["y"],
+                    "start_x": metadata["start"]["x"],
+                    "start_y": metadata["start"]["y"],
+                    "start_yaw": metadata["start"]["yaw"],
+                    "goal_x": metadata["goal"]["x"],
+                    "goal_y": metadata["goal"]["y"],
                 }
             )
 
@@ -109,6 +109,9 @@ def main() -> None:
             "validation": args.validation_seed_base,
             "test": args.test_seed_base,
         },
+        "start_goal_randomization": config.get(
+            "start_goal_randomization", {"enabled": False}
+        ),
     }
     with (args.output_root / "dataset_info.json").open("w", encoding="utf-8") as stream:
         json.dump(dataset_info, stream, indent=2)

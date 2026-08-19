@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import heapq
 import json
 import math
@@ -338,6 +339,65 @@ def _uniform_size(rng: random.Random, profile: dict[str, Any], key: str) -> floa
     return rng.uniform(low, high)
 
 
+def _config_with_episode_geometry(
+    rng: random.Random, config: dict[str, Any]
+) -> dict[str, Any]:
+    """Return a private config copy with an optional random start and goal."""
+    active = copy.deepcopy(config)
+    settings = active.get("start_goal_randomization", {})
+    if not bool(settings.get("enabled", False)):
+        return active
+
+    arena = active["arena"]
+    start = active["start"]
+    goal = active["goal"]
+    default_clearance = max(
+        robot_inflation_radius(active),
+        float(start["exclusion_radius"]),
+        float(goal["exclusion_radius"]),
+    )
+    clearance = float(settings.get("boundary_clearance", default_clearance))
+    minimum_distance = float(settings["minimum_distance"])
+    maximum_distance = float(settings.get("maximum_distance", math.inf))
+    attempts = int(settings.get("max_sampling_attempts", 1000))
+
+    if clearance <= 0.0:
+        raise ValueError("start/goal boundary_clearance must be positive")
+    if minimum_distance <= 0.0:
+        raise ValueError("start/goal minimum_distance must be positive")
+    if maximum_distance < minimum_distance:
+        raise ValueError("start/goal maximum_distance is smaller than minimum_distance")
+    if attempts <= 0:
+        raise ValueError("start/goal max_sampling_attempts must be positive")
+
+    x_min = float(arena["x_min"]) + clearance
+    x_max = float(arena["x_max"]) - clearance
+    y_min = float(arena["y_min"]) + clearance
+    y_max = float(arena["y_max"]) - clearance
+    if x_min >= x_max or y_min >= y_max:
+        raise ValueError("start/goal boundary clearance leaves no usable arena")
+
+    for _ in range(attempts):
+        start_x = rng.uniform(x_min, x_max)
+        start_y = rng.uniform(y_min, y_max)
+        goal_x = rng.uniform(x_min, x_max)
+        goal_y = rng.uniform(y_min, y_max)
+        distance = math.hypot(goal_x - start_x, goal_y - start_y)
+        if minimum_distance <= distance <= maximum_distance:
+            start["x"] = round(start_x, 6)
+            start["y"] = round(start_y, 6)
+            if bool(settings.get("randomize_start_yaw", True)):
+                start["yaw"] = round(rng.uniform(-math.pi, math.pi), 6)
+            goal["x"] = round(goal_x, 6)
+            goal["y"] = round(goal_y, 6)
+            return active
+
+    raise RuntimeError(
+        f"could not sample start/goal distance in "
+        f"[{minimum_distance}, {maximum_distance}] after {attempts} attempts"
+    )
+
+
 def _random_candidate(
     rng: random.Random,
     profile: dict[str, Any],
@@ -402,7 +462,8 @@ def generate_boxes(
     require_blocker = count > 0 and rng.random() < float(profile.get("direct_block_probability", 0.0))
 
     for world_attempt in range(1, max_world_attempts + 1):
-        boundary_walls = make_boundary_walls(config)
+        active_config = _config_with_episode_geometry(rng, config)
+        boundary_walls = make_boundary_walls(active_config)
         placed: list[Box] = list(boundary_walls)
         success = True
         for index in range(count):
@@ -410,9 +471,13 @@ def generate_boxes(
             direct = require_blocker and index == 0
             for _ in range(max_placement_attempts):
                 candidate = _random_candidate(
-                    rng, profile, config, f"box_{index:03d}", direct_blocker=direct
+                    rng,
+                    profile,
+                    active_config,
+                    f"box_{index:03d}",
+                    direct_blocker=direct,
                 )
-                if candidate_is_valid(candidate, placed, config):
+                if candidate_is_valid(candidate, placed, active_config):
                     placed.append(candidate)
                     placed_this_box = True
                     break
@@ -422,10 +487,10 @@ def generate_boxes(
         if not success:
             continue
 
-        errors, path = validate_boxes(placed, config)
+        errors, path = validate_boxes(placed, active_config)
         if errors or path is None:
             continue
-        if require_blocker and not direct_path_blocked(placed, config):
+        if require_blocker and not direct_path_blocked(placed, active_config):
             continue
 
         path_length = sum(
@@ -438,12 +503,14 @@ def generate_boxes(
             "random_obstacle_count": count,
             "boundary_wall_count": len(boundary_walls),
             "total_box_count": len(placed),
-            "direct_path_blocked": direct_path_blocked(placed, config),
+            "direct_path_blocked": direct_path_blocked(placed, active_config),
             "astar_path_length_m": round(path_length, 4),
             "generation_attempt": world_attempt,
-            "start": config["start"],
-            "goal": config["goal"],
-            "robot_inflation_radius_m": round(robot_inflation_radius(config), 4),
+            "start": active_config["start"],
+            "goal": active_config["goal"],
+            "robot_inflation_radius_m": round(
+                robot_inflation_radius(active_config), 4
+            ),
         }
         return placed, metadata
 

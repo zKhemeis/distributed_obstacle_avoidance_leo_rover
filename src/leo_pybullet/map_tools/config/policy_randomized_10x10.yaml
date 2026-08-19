@@ -1,0 +1,66 @@
+arena:
+  x_min: -5.0
+  x_max: 5.0
+  y_min: -5.0
+  y_max: 5.0
+  boundary_margin: 0.10
+
+boundary_walls:
+  enabled: true
+  thickness: 0.12
+  height: 0.45
+
+# These values are templates. Each generated map receives its own start, yaw,
+# and goal through start_goal_randomization below.
+start:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  exclusion_radius: 0.60
+
+goal:
+  x: 2.0
+  y: 0.0
+  exclusion_radius: 0.55
+
+start_goal_randomization:
+  enabled: true
+  minimum_distance: 3.0
+  maximum_distance: 10.0
+  boundary_clearance: 0.65
+  randomize_start_yaw: true
+  max_sampling_attempts: 1000
+
+robot:
+  length: 0.47
+  width: 0.48
+  safety_margin: 0.08
+
+planner:
+  resolution: 0.08
+  allow_diagonal: true
+
+generation:
+  inter_obstacle_gap: 0.10
+  max_placement_attempts: 2000
+  max_world_attempts: 250
+
+difficulties:
+  easy:
+    obstacle_count: [2, 4]
+    size_x: [0.25, 0.55]
+    size_y: [0.25, 0.55]
+    size_z: [0.25, 0.65]
+    direct_block_probability: 0.15
+  medium:
+    obstacle_count: [5, 8]
+    size_x: [0.25, 0.75]
+    size_y: [0.25, 0.70]
+    size_z: [0.25, 0.80]
+    direct_block_probability: 0.55
+  hard:
+    obstacle_count: [8, 12]
+    size_x: [0.25, 0.90]
+    size_y: [0.25, 0.80]
+    size_z: [0.25, 0.90]
+    direct_block_probability: 0.85
