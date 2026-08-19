@@ -15,6 +15,7 @@
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "tf2_ros/static_transform_broadcaster.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include "visualization_msgs/msg/marker_array.hpp"
@@ -36,6 +37,7 @@ public:
     imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", 10);
     marker_pub_ =
       create_publisher<visualization_msgs::msg::MarkerArray>("/pybullet_markers", 10);
+    collision_pub_ = create_publisher<std_msgs::msg::Bool>("/collision", 10);
     joint_state_pub_ = create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     static_tf_broadcaster_ =
@@ -47,9 +49,12 @@ public:
     } else if (world_file == "empty") {
       world_file = "/root/leo_ws/src/leo_pybullet/worlds/empty_world.yaml";
     }
+    const double start_x = declare_parameter<double>("start_x", 0.0);
+    const double start_y = declare_parameter<double>("start_y", 0.0);
+    const double start_yaw = declare_parameter<double>("start_yaw", 0.0);
 
     try {
-      core_.reset(world_file);
+      core_.reset(world_file, start_x, start_y, start_yaw);
     } catch (const std::exception & error) {
       RCLCPP_FATAL(get_logger(), "Failed to initialize Bullet world: %s", error.what());
       throw;
@@ -64,6 +69,9 @@ public:
     RCLCPP_INFO(
       get_logger(), "Loaded %zu obstacles from %s",
       core_.obstacles().size(), world_file.c_str());
+    RCLCPP_INFO(
+      get_logger(), "Initial pose: x=%.6f y=%.6f yaw=%.6f",
+      start_x, start_y, start_yaw);
     RCLCPP_INFO(get_logger(), "Bullet simulator with reusable physics core started");
   }
 
@@ -88,6 +96,7 @@ private:
       publishOdom();
       publishImu();
       publishJointStates();
+      publishCollision();
     }
 
     const auto physics_rate =
@@ -274,6 +283,13 @@ private:
     joint_state_pub_->publish(message);
   }
 
+  void publishCollision()
+  {
+    std_msgs::msg::Bool message;
+    message.data = core_.hasCollision();
+    collision_pub_->publish(message);
+  }
+
   void publishStaticTransforms()
   {
     const auto stamp = now();
@@ -325,6 +341,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr collision_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   std::unique_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;

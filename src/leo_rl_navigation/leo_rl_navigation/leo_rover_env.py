@@ -19,10 +19,7 @@ from leo_bullet_sim import (
     NUMBER_OF_RAYS,
     PHYSICS_RATE,
 )
-
-
-def _wrap_angle(angle: float) -> float:
-    return math.atan2(math.sin(angle), math.cos(angle))
+from leo_rl_navigation.policy_io import action_to_command, build_observation
 
 
 class LeoRoverEnv(gym.Env):
@@ -201,17 +198,11 @@ class LeoRoverEnv(gym.Env):
         self,
         action: np.ndarray,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        action_array = np.asarray(action, dtype=np.float32)
-        if action_array.shape != (2,):
-            raise ValueError(f'Action must have shape (2,), got {action_array.shape}')
-        if not np.isfinite(action_array).all():
-            raise ValueError('Action contains NaN or infinity')
-        action_array = np.clip(
-            action_array, self.action_space.low, self.action_space.high)
-
-        linear_velocity = (
-            (float(action_array[0]) + 1.0) * 0.5 * self.linear_speed_max)
-        angular_velocity = float(action_array[1]) * self.angular_speed_max
+        linear_velocity, angular_velocity = action_to_command(
+            action,
+            linear_speed_max=self.linear_speed_max,
+            angular_speed_max=self.angular_speed_max,
+        )
         self._simulation.set_command(linear_velocity, angular_velocity)
         self._simulation.step(CONTROL_PHYSICS_STEPS)
         self._episode_steps += 1
@@ -258,45 +249,19 @@ class LeoRoverEnv(gym.Env):
     ) -> tuple[np.ndarray, dict[str, float]]:
         state = self._simulation.robot_state()
         scan = self._simulation.laser_scan()
-        ranges = np.asarray(scan.ranges, dtype=np.float32)
-
-        if ranges.shape != (NUMBER_OF_RAYS,):
-            raise RuntimeError(
-                f'Expected {NUMBER_OF_RAYS} rays, received {ranges.shape}')
-        if np.isnan(ranges).any() or np.isneginf(ranges).any():
-            raise RuntimeError('LiDAR contains NaN or negative infinity')
-
-        ranges = ranges.copy()
-        ranges[np.isposinf(ranges)] = LIDAR_RANGE_MAX
-        ranges = np.clip(ranges, LIDAR_RANGE_MIN, LIDAR_RANGE_MAX)
-        sector_ranges = ranges.reshape(self.n_sectors, -1).min(axis=1)
-        normalized_ranges = sector_ranges / LIDAR_RANGE_MAX
-
-        delta_x = float(self._goal[0] - state.transform.x)
-        delta_y = float(self._goal[1] - state.transform.y)
-        distance = math.hypot(delta_x, delta_y)
-        goal_angle = math.atan2(delta_y, delta_x)
-        relative_bearing = _wrap_angle(goal_angle - state.yaw)
-        normalized_distance = min(distance / self.maximum_goal_distance, 1.0)
-
-        observation = np.concatenate((
-            normalized_ranges,
-            np.array([
-                normalized_distance,
-                math.sin(relative_bearing),
-                math.cos(relative_bearing),
-            ], dtype=np.float32),
-        )).astype(np.float32, copy=False)
-
-        measurements = {
-            'distance_to_goal': float(distance),
-            'relative_bearing': float(relative_bearing),
-            'minimum_scan': float(ranges.min()),
-            'pose_x': float(state.transform.x),
-            'pose_y': float(state.transform.y),
-            'pose_yaw': float(state.yaw),
-        }
-        return observation, measurements
+        return build_observation(
+            scan.ranges,
+            pose_x=state.transform.x,
+            pose_y=state.transform.y,
+            pose_yaw=state.yaw,
+            goal_x=float(self._goal[0]),
+            goal_y=float(self._goal[1]),
+            number_of_rays=NUMBER_OF_RAYS,
+            n_sectors=self.n_sectors,
+            range_min=LIDAR_RANGE_MIN,
+            range_max=LIDAR_RANGE_MAX,
+            maximum_goal_distance=self.maximum_goal_distance,
+        )
 
     def _build_info(
         self,

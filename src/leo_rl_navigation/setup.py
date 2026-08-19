@@ -13,6 +13,8 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/config', glob('config/*.yaml')),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
+        ('share/' + package_name + '/rviz', glob('rviz/*.rviz')),
     ],
     install_requires=['setuptools', 'numpy', 'gymnasium'],
     zip_safe=True,
@@ -30,6 +32,7 @@ setup(
             'leo_rl_env_smoke = leo_rl_navigation.env_smoke:main',
             'leo_rl_train = leo_rl_navigation.train_ppo:main',
             'leo_rl_evaluate = leo_rl_navigation.evaluate_policy:main',
+            'leo_rl_policy = leo_rl_navigation.ros_policy_node:main',
         ],
     },
 )
