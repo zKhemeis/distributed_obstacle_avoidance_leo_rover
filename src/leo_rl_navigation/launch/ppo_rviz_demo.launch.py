@@ -16,6 +16,16 @@ from launch.actions import (
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+import xacro
+
+
+def _boolean_argument(value: str, name: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {'1', 'true', 'yes', 'on'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'off'}:
+        return False
+    raise ValueError(f'{name} must be true or false, got: {value}')
 
 
 def _resolve_world(manifest: Path, split: str, configured: str) -> Path:
@@ -40,6 +50,10 @@ def _launch_scenario(context):
     ).expanduser().resolve()
     python_executable = LaunchConfiguration(
         'python_executable').perform(context)
+    detailed_model = _boolean_argument(
+        LaunchConfiguration('detailed_model').perform(context),
+        'detailed_model',
+    )
 
     if not manifest.is_file():
         raise FileNotFoundError(f'Manifest does not exist: {manifest}')
@@ -84,15 +98,17 @@ def _launch_scenario(context):
         '-p', 'sensor_timeout:=0.50',
     ]
 
-    rviz_config = Path(
-        get_package_share_directory('leo_rl_navigation')
-    ) / 'rviz' / 'ppo_demo.rviz'
+    package_share = Path(get_package_share_directory('leo_rl_navigation'))
+    rviz_filename = (
+        'ppo_demo_detailed.rviz' if detailed_model else 'ppo_demo.rviz')
+    rviz_config = package_share / 'rviz' / rviz_filename
 
-    return [
+    actions = [
         LogInfo(msg=(
             f'Benchmark {split}[{world_index}]: {world.name}; '
             f'start=({start_x:.6f}, {start_y:.6f}, {start_yaw:.6f}); '
-            f'goal=({goal_x:.6f}, {goal_y:.6f})')),
+            f'goal=({goal_x:.6f}, {goal_y:.6f}); '
+            f'detailed_model={detailed_model}')),
         Node(
             package='leo_pybullet',
             executable='pybullet_sim_node',
@@ -117,6 +133,40 @@ def _launch_scenario(context):
             output='screen',
         ),
         ExecuteProcess(cmd=policy_command, output='screen'),
+    ]
+
+    if detailed_model:
+        visualization_xacro = package_share / 'urdf' / 'leo_visualization.urdf.xacro'
+        if not visualization_xacro.is_file():
+            raise FileNotFoundError(
+                f'Visualization Xacro does not exist: {visualization_xacro}')
+        robot_description = xacro.process_file(
+            str(visualization_xacro),
+            mappings={'mecanum_wheels': 'false'},
+        ).toxml()
+        actions.extend([
+            Node(
+                package='robot_state_publisher',
+                executable='robot_state_publisher',
+                name='leo_visual_robot_state_publisher',
+                output='screen',
+                parameters=[{'robot_description': robot_description}],
+            ),
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='base_to_visual_model',
+                arguments=[
+                    '--x', '0.0', '--y', '0.0', '--z', '0.0',
+                    '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0',
+                    '--frame-id', 'base_link',
+                    '--child-frame-id', 'visual_base_link',
+                ],
+                output='screen',
+            ),
+        ])
+
+    actions.append(
         Node(
             package='rviz2',
             executable='rviz2',
@@ -125,8 +175,9 @@ def _launch_scenario(context):
             additional_env={'LIBGL_ALWAYS_SOFTWARE': '1'},
             condition=IfCondition(LaunchConfiguration('rviz')),
             output='screen',
-        ),
-    ]
+        )
+    )
+    return actions
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -149,6 +200,13 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             'python_executable',
             default_value='/root/leo_ws/.venv_rl/bin/python',
+        ),
+        DeclareLaunchArgument(
+            'detailed_model',
+            default_value='true',
+            description=(
+                'Show the detailed Leo mesh through robot_state_publisher. '
+                'This changes visualization only.'),
         ),
         DeclareLaunchArgument('rviz', default_value='true'),
         OpaqueFunction(function=_launch_scenario),
