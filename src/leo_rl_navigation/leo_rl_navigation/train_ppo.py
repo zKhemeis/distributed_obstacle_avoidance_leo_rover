@@ -43,6 +43,77 @@ def _reset_linear_action_head(
         action_net.bias[0].fill_(initial_bias)
 
 
+def _expand_policy_observation(
+    source_model: PPO,
+    target_model: PPO,
+    inserted_index: int,
+) -> int:
+    """Copy a policy into a model with one inserted observation feature.
+
+    The new input column is initialized to zero. Consequently, the expanded
+    policy initially produces the same outputs as the source policy while the
+    new feature remains available for subsequent fine-tuning.
+    """
+    source_shape = source_model.observation_space.shape
+    target_shape = target_model.observation_space.shape
+    if source_shape is None or target_shape is None:
+        raise ValueError('Observation spaces must have fixed shapes')
+    if len(source_shape) != 1 or len(target_shape) != 1:
+        raise ValueError('Only one-dimensional observations are supported')
+
+    source_width = int(source_shape[0])
+    target_width = int(target_shape[0])
+    if target_width != source_width + 1:
+        raise ValueError(
+            'Expanded target observation must contain exactly one additional '
+            f'feature: source={source_width}, target={target_width}')
+    if not 0 <= inserted_index <= source_width:
+        raise ValueError(
+            f'Inserted observation index must be in [0, {source_width}]')
+    if source_model.action_space != target_model.action_space:
+        raise ValueError('Initial model action space is incompatible')
+
+    source_state = source_model.policy.state_dict()
+    target_state = target_model.policy.state_dict()
+    if list(source_state) != list(target_state):
+        raise ValueError('Initial and target policy parameters are incompatible')
+
+    expanded_state = {}
+    expanded_parameters = 0
+    for name, target_tensor in target_state.items():
+        source_tensor = source_state[name]
+        if source_tensor.shape == target_tensor.shape:
+            expanded_state[name] = source_tensor.detach().clone()
+            continue
+
+        can_expand_input = (
+            source_tensor.ndim == 2 and
+            target_tensor.ndim == 2 and
+            source_tensor.shape[0] == target_tensor.shape[0] and
+            source_tensor.shape[1] == source_width and
+            target_tensor.shape[1] == target_width
+        )
+        if not can_expand_input:
+            raise ValueError(
+                f'Cannot expand policy parameter {name}: '
+                f'{tuple(source_tensor.shape)} -> '
+                f'{tuple(target_tensor.shape)}')
+
+        expanded_tensor = torch.zeros_like(target_tensor)
+        expanded_tensor[:, :inserted_index] = (
+            source_tensor[:, :inserted_index])
+        expanded_tensor[:, inserted_index + 1:] = (
+            source_tensor[:, inserted_index:])
+        expanded_state[name] = expanded_tensor
+        expanded_parameters += 1
+
+    if expanded_parameters == 0:
+        raise ValueError('No observation-input policy parameters were expanded')
+
+    target_model.policy.load_state_dict(expanded_state, strict=True)
+    return expanded_parameters
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
@@ -79,11 +150,41 @@ def main() -> None:
             'of linear_speed_max.'
         ),
     )
+    parser.add_argument(
+        '--expand-observation-at-index',
+        type=int,
+        help=(
+            'Expand a one-dimensional --initial-model observation by one '
+            'feature at this zero-based index. The inserted input weights '
+            'start at zero, preserving the source policy exactly.'
+        ),
+    )
+    parser.add_argument(
+        '--save-initialized-model-only',
+        action='store_true',
+        help=(
+            'Create and save initialized_model.zip without learning. Requires '
+            '--initial-model and is intended for equivalence auditing.'
+        ),
+    )
     args = parser.parse_args()
 
     if args.reset_linear_action_head and not args.initial_model:
         raise ValueError(
             '--reset-linear-action-head requires --initial-model')
+    if args.expand_observation_at_index is not None and not args.initial_model:
+        raise ValueError(
+            '--expand-observation-at-index requires --initial-model')
+    if args.save_initialized_model_only and not args.initial_model:
+        raise ValueError(
+            '--save-initialized-model-only requires --initial-model')
+    if (
+        args.reset_linear_action_head and
+        args.expand_observation_at_index is not None
+    ):
+        raise ValueError(
+            '--reset-linear-action-head and --expand-observation-at-index '
+            'cannot be combined')
 
     config = load_config(args.config)
     training = config['training']
@@ -188,20 +289,34 @@ def main() -> None:
 
     initial_model_path = None
     initial_model_timesteps = None
+    expanded_policy_parameters = None
     if args.initial_model:
         initial_model_path = Path(args.initial_model).expanduser().resolve()
         if not initial_model_path.is_file():
             raise FileNotFoundError(
                 f'Initial model does not exist: {initial_model_path}')
         initial_model = PPO.load(initial_model_path, device=args.device)
-        if initial_model.observation_space != model.observation_space:
-            raise ValueError('Initial model observation space is incompatible')
-        if initial_model.action_space != model.action_space:
-            raise ValueError('Initial model action space is incompatible')
-        model.policy.load_state_dict(
-            initial_model.policy.state_dict(),
-            strict=True,
-        )
+        if args.expand_observation_at_index is None:
+            if initial_model.observation_space != model.observation_space:
+                raise ValueError(
+                    'Initial model observation space is incompatible')
+            if initial_model.action_space != model.action_space:
+                raise ValueError('Initial model action space is incompatible')
+            model.policy.load_state_dict(
+                initial_model.policy.state_dict(),
+                strict=True,
+            )
+        else:
+            expanded_policy_parameters = _expand_policy_observation(
+                initial_model,
+                model,
+                args.expand_observation_at_index,
+            )
+            print(
+                'expanded_observation=true '
+                f'inserted_index={args.expand_observation_at_index} '
+                f'expanded_parameters={expanded_policy_parameters}'
+            )
         if args.reset_linear_action_head:
             _reset_linear_action_head(
                 model,
@@ -238,12 +353,29 @@ def main() -> None:
                 float(args.linear_action_initial_bias)
                 if args.reset_linear_action_head else None
             ),
+            'expand_observation_at_index': (
+                args.expand_observation_at_index
+            ),
+            'expanded_policy_parameters': expanded_policy_parameters,
+            'save_initialized_model_only': bool(
+                args.save_initialized_model_only),
         },
     }
     with (run_directory / 'resolved_config.json').open(
             'w', encoding='utf-8') as stream:
         json.dump(resolved, stream, indent=2)
         stream.write('\n')
+
+    if args.initial_model:
+        initialized_model_path = run_directory / 'initialized_model'
+        model.save(initialized_model_path)
+        print(f'initialized_model={initialized_model_path}.zip')
+
+    if args.save_initialized_model_only:
+        train_environment.close()
+        validation_environment.close()
+        print('learning_skipped=true')
+        return
 
     try:
         model.learn(
