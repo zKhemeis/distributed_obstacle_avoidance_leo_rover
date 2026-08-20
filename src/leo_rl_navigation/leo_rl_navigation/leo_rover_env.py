@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from collections import deque
 import math
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,15 @@ class LeoRoverEnv(gym.Env):
         time_penalty: float = 0.01,
         goal_reward: float = 20.0,
         collision_penalty: float = 20.0,
+        timeout_penalty: float = 0.0,
+        safety_distance: float = 0.0,
+        proximity_penalty_weight: float = 0.0,
+        unsafe_speed_penalty_weight: float = 0.0,
+        stuck_window_steps: int = 0,
+        stuck_displacement_threshold: float = 0.05,
+        stuck_yaw_threshold: float = 0.10,
+        stuck_minimum_command_speed: float = 0.05,
+        stuck_penalty: float = 0.0,
         settle_physics_steps: int = CONTROL_PHYSICS_STEPS,
         sequential_worlds: bool = False,
     ) -> None:
@@ -56,6 +66,21 @@ class LeoRoverEnv(gym.Env):
             raise ValueError('maximum_goal_distance must be positive')
         if maximum_episode_steps <= 0:
             raise ValueError('maximum_episode_steps must be positive')
+        nonnegative_values = {
+            'timeout_penalty': timeout_penalty,
+            'safety_distance': safety_distance,
+            'proximity_penalty_weight': proximity_penalty_weight,
+            'unsafe_speed_penalty_weight': unsafe_speed_penalty_weight,
+            'stuck_displacement_threshold': stuck_displacement_threshold,
+            'stuck_yaw_threshold': stuck_yaw_threshold,
+            'stuck_minimum_command_speed': stuck_minimum_command_speed,
+            'stuck_penalty': stuck_penalty,
+        }
+        for name, value in nonnegative_values.items():
+            if value < 0.0:
+                raise ValueError(f'{name} must be non-negative')
+        if stuck_window_steps < 0:
+            raise ValueError('stuck_window_steps must be non-negative')
 
         self.manifest_path = Path(manifest_path).expanduser().resolve()
         self.split = split
@@ -69,6 +94,18 @@ class LeoRoverEnv(gym.Env):
         self.time_penalty = float(time_penalty)
         self.goal_reward = float(goal_reward)
         self.collision_penalty = float(collision_penalty)
+        self.timeout_penalty = float(timeout_penalty)
+        self.safety_distance = float(safety_distance)
+        self.proximity_penalty_weight = float(proximity_penalty_weight)
+        self.unsafe_speed_penalty_weight = float(
+            unsafe_speed_penalty_weight)
+        self.stuck_window_steps = int(stuck_window_steps)
+        self.stuck_displacement_threshold = float(
+            stuck_displacement_threshold)
+        self.stuck_yaw_threshold = float(stuck_yaw_threshold)
+        self.stuck_minimum_command_speed = float(
+            stuck_minimum_command_speed)
+        self.stuck_penalty = float(stuck_penalty)
         self.settle_physics_steps = int(settle_physics_steps)
         self.sequential_worlds = bool(sequential_worlds)
 
@@ -80,6 +117,8 @@ class LeoRoverEnv(gym.Env):
         self._world_file = ''
         self._manifest_index = -1
         self._next_world_index = 0
+        self._pose_history: deque[tuple[float, float, float]] = deque(
+            maxlen=max(self.stuck_window_steps + 1, 1))
 
         observation_low = np.concatenate((
             np.zeros(self.n_sectors + 1, dtype=np.float32),
@@ -185,11 +224,18 @@ class LeoRoverEnv(gym.Env):
 
         observation, measurements = self._observation_and_measurements()
         self._previous_distance = measurements['distance_to_goal']
+        self._pose_history.clear()
+        self._pose_history.append((
+            measurements['pose_x'],
+            measurements['pose_y'],
+            measurements['pose_yaw'],
+        ))
         info = self._build_info(
             measurements,
             success=False,
             collision=self._simulation.has_collision(),
             timeout=False,
+            stuck=False,
             reward_terms=None,
         )
         return observation, info
@@ -211,7 +257,13 @@ class LeoRoverEnv(gym.Env):
         distance = measurements['distance_to_goal']
         collision = bool(self._simulation.has_collision())
         success = bool(distance <= self.goal_tolerance and not collision)
-        terminated = collision or success
+        self._pose_history.append((
+            measurements['pose_x'],
+            measurements['pose_y'],
+            measurements['pose_yaw'],
+        ))
+        stuck = self._is_stuck(linear_velocity) and not collision and not success
+        terminated = collision or success or stuck
         truncated = (
             self._episode_steps >= self.maximum_episode_steps and
             not terminated
@@ -222,8 +274,25 @@ class LeoRoverEnv(gym.Env):
         reward_time = -self.time_penalty
         reward_goal = self.goal_reward if success else 0.0
         reward_collision = -self.collision_penalty if collision else 0.0
+        reward_timeout = -self.timeout_penalty if truncated else 0.0
+        reward_stuck = -self.stuck_penalty if stuck else 0.0
+        clearance_ratio = 0.0
+        if self.safety_distance > 0.0:
+            clearance_ratio = max(
+                0.0,
+                (self.safety_distance - measurements['minimum_scan']) /
+                self.safety_distance,
+            )
+        normalized_linear_speed = linear_velocity / self.linear_speed_max
+        reward_proximity = (
+            -self.proximity_penalty_weight * clearance_ratio ** 2)
+        reward_unsafe_speed = (
+            -self.unsafe_speed_penalty_weight *
+            normalized_linear_speed * clearance_ratio)
         reward = (
-            reward_progress + reward_time + reward_goal + reward_collision)
+            reward_progress + reward_time + reward_goal + reward_collision +
+            reward_timeout + reward_stuck + reward_proximity +
+            reward_unsafe_speed)
         self._previous_distance = distance
 
         if terminated or truncated:
@@ -234,15 +303,40 @@ class LeoRoverEnv(gym.Env):
             'reward_time': float(reward_time),
             'reward_goal': float(reward_goal),
             'reward_collision': float(reward_collision),
+            'reward_timeout': float(reward_timeout),
+            'reward_stuck': float(reward_stuck),
+            'reward_proximity': float(reward_proximity),
+            'reward_unsafe_speed': float(reward_unsafe_speed),
         }
         info = self._build_info(
             measurements,
             success=success,
             collision=collision,
             timeout=truncated,
+            stuck=stuck,
             reward_terms=reward_terms,
         )
         return observation, float(reward), terminated, truncated, info
+
+    def _is_stuck(self, linear_velocity: float) -> bool:
+        if self.stuck_window_steps <= 0:
+            return False
+        if len(self._pose_history) < self.stuck_window_steps + 1:
+            return False
+        if linear_velocity < self.stuck_minimum_command_speed:
+            return False
+
+        old_x, old_y, old_yaw = self._pose_history[0]
+        new_x, new_y, new_yaw = self._pose_history[-1]
+        displacement = math.hypot(new_x - old_x, new_y - old_y)
+        yaw_change = abs(math.atan2(
+            math.sin(new_yaw - old_yaw),
+            math.cos(new_yaw - old_yaw),
+        ))
+        return (
+            displacement < self.stuck_displacement_threshold and
+            yaw_change < self.stuck_yaw_threshold
+        )
 
     def _observation_and_measurements(
         self,
@@ -270,12 +364,14 @@ class LeoRoverEnv(gym.Env):
         success: bool,
         collision: bool,
         timeout: bool,
+        stuck: bool,
         reward_terms: dict[str, float] | None,
     ) -> dict[str, Any]:
         info: dict[str, Any] = {
             'is_success': bool(success),
             'collision': bool(collision),
             'timeout': bool(timeout),
+            'stuck': bool(stuck),
             'episode_step': self._episode_steps,
             'simulation_time': float(self._simulation.simulation_time),
             'world_file': self._world_file,

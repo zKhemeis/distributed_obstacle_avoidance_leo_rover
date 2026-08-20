@@ -12,6 +12,7 @@ import numpy as np
 from stable_baselines3 import PPO
 
 from leo_rl_navigation import LeoRoverEnv
+from leo_rl_navigation.training_utils import environment_kwargs, load_config
 
 
 RESULT_FIELDS = (
@@ -22,6 +23,7 @@ RESULT_FIELDS = (
     'success',
     'collision',
     'timeout',
+    'stuck',
     'steps',
     'duration_s',
     'episode_return',
@@ -47,6 +49,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--manifest', required=True)
     parser.add_argument(
+        '--config',
+        help='Optional training config defining the environment contract.',
+    )
+    parser.add_argument(
         '--split', choices=('validation', 'test'), default='validation')
     policy = parser.add_mutually_exclusive_group(required=True)
     policy.add_argument('--model')
@@ -57,10 +63,15 @@ def main() -> None:
     parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
 
-    environment = LeoRoverEnv(
-        manifest_path=args.manifest,
-        split=args.split,
-    )
+    if args.config:
+        arguments = environment_kwargs(load_config(args.config))
+        arguments['manifest_path'] = args.manifest
+        environment = LeoRoverEnv(split=args.split, **arguments)
+    else:
+        environment = LeoRoverEnv(
+            manifest_path=args.manifest,
+            split=args.split,
+        )
     episode_count = environment.world_count
     if args.episodes > 0:
         episode_count = min(args.episodes, episode_count)
@@ -124,6 +135,7 @@ def main() -> None:
             'success': int(info['is_success']),
             'collision': int(info['collision']),
             'timeout': int(info['timeout']),
+            'stuck': int(info['stuck']),
             'steps': info['episode_step'],
             'duration_s': round(
                 info['episode_step'] * environment.control_period, 6),
@@ -142,14 +154,17 @@ def main() -> None:
     successes = sum(row['success'] for row in rows)
     collisions = sum(row['collision'] for row in rows)
     timeouts = sum(row['timeout'] for row in rows)
+    stuck = sum(row['stuck'] for row in rows)
     print(f'policy={policy_name}')
     print(f'split={args.split}')
     print(f'episodes={len(rows)}')
     print(f'successes={successes}')
     print(f'collisions={collisions}')
     print(f'timeouts={timeouts}')
+    print(f'stuck={stuck}')
     print(f'success_rate={successes / max(len(rows), 1):.6f}')
     print(f'collision_rate={collisions / max(len(rows), 1):.6f}')
+    print(f'stuck_rate={stuck / max(len(rows), 1):.6f}')
     print(f'output={output_path}')
     environment.close()
 

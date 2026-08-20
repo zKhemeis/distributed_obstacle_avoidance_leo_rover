@@ -16,6 +16,7 @@ INFO_KEYWORDS = (
     'is_success',
     'collision',
     'timeout',
+    'stuck',
     'distance_to_goal',
     'minimum_scan',
 )

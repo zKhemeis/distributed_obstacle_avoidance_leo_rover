@@ -9,11 +9,16 @@ import numpy as np
 from stable_baselines3.common.env_checker import check_env
 
 from leo_rl_navigation import LeoRoverEnv
+from leo_rl_navigation.training_utils import environment_kwargs, load_config
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--manifest', required=True)
+    parser.add_argument(
+        '--config',
+        help='Optional training config defining the environment contract.',
+    )
     parser.add_argument('--split', default='train')
     parser.add_argument('--steps', type=int, default=500)
     parser.add_argument('--seed', type=int, default=7)
@@ -22,10 +27,15 @@ def main() -> None:
     if args.steps <= 0:
         parser.error('--steps must be positive')
 
-    environment = LeoRoverEnv(
-        manifest_path=args.manifest,
-        split=args.split,
-    )
+    if args.config:
+        arguments = environment_kwargs(load_config(args.config))
+        arguments['manifest_path'] = args.manifest
+        environment = LeoRoverEnv(split=args.split, **arguments)
+    else:
+        environment = LeoRoverEnv(
+            manifest_path=args.manifest,
+            split=args.split,
+        )
     print(f'worlds={environment.world_count}')
     print(f'observation_shape={environment.observation_space.shape}')
     print(f'action_shape={environment.action_space.shape}')
@@ -47,6 +57,7 @@ def main() -> None:
     completed_episodes = 0
     collisions = 0
     successes = 0
+    stuck = 0
     wall_start = time.perf_counter()
     for step_index in range(args.steps):
         action = environment.action_space.sample()
@@ -57,6 +68,7 @@ def main() -> None:
             completed_episodes += 1
             collisions += int(info['collision'])
             successes += int(info['is_success'])
+            stuck += int(info['stuck'])
             environment.reset(seed=args.seed + step_index + 1)
 
     wall_seconds = time.perf_counter() - wall_start
@@ -68,6 +80,7 @@ def main() -> None:
     print(f'completed_episodes={completed_episodes}')
     print(f'collisions={collisions}')
     print(f'successes={successes}')
+    print(f'stuck={stuck}')
     print(f'wall_time_s={wall_seconds:.6f}')
     print(f'steps_per_second={steps_per_second:.3f}')
     print(f'rtf={real_time_factor:.3f}')
