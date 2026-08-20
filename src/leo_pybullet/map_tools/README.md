@@ -169,6 +169,32 @@ python3 scripts/generate_dataset.py \
 The scenario label, straight-line distance, A* path length and path-stretch
 ratio are recorded in both metadata and `manifest.csv`.
 
+### Hard staggered-blocker curriculum
+
+`policy_lidar_hard_10x10.yaml` adds a `double_block` scenario containing two
+staggered obstacles on the start-goal corridor. It also increases random
+obstacle density, start-goal distance and required A* path stretch. The
+scenario cycle retains single-block and clear worlds to limit catastrophic
+forgetting.
+
+Generate this dataset with independent seed ranges and a new output directory:
+
+```bash
+python3 scripts/generate_dataset.py \
+  --config config/policy_lidar_hard_10x10.yaml \
+  --output-root /root/leo_ws/src/leo_pybullet/worlds/benchmark_v4_hard \
+  --train 450 \
+  --validation 90 \
+  --test 120 \
+  --train-seed-base 300000 \
+  --validation-seed-base 400000 \
+  --test-seed-base 500000
+```
+
+Keep the `test` split sealed until a checkpoint has been selected using the
+new validation split and has passed regression checks on the v3 curriculum and
+the original benchmark-v2 validation sets.
+
 ## 10. Evaluation files
 
 `generate_dataset.py` creates:

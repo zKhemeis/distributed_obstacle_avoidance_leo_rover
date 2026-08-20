@@ -101,6 +101,9 @@ def main() -> None:
                     "seed": seed,
                     "difficulty": difficulty,
                     "scenario": metadata["scenario"],
+                    "structured_blocker_count": metadata[
+                        "structured_blocker_count"
+                    ],
                     "random_obstacle_count": metadata["random_obstacle_count"],
                     "boundary_wall_count": metadata["boundary_wall_count"],
                     "total_box_count": metadata["total_box_count"],

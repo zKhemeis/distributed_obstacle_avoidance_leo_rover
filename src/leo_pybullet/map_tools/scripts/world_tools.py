@@ -505,6 +505,62 @@ def _structured_blocker_candidate(
     )
 
 
+def _double_blocker_candidate(
+    rng: random.Random,
+    profile: dict[str, Any],
+    config: dict[str, Any],
+    name: str,
+    slot: int,
+    side_sign: float,
+) -> Box:
+    """Place one of two staggered blockers along the start-goal corridor."""
+    fraction_ranges = profile["double_blocker_fractions"]
+    if len(fraction_ranges) != 2:
+        raise ValueError("double_blocker_fractions must contain two ranges")
+    if slot not in (0, 1):
+        raise ValueError("double blocker slot must be zero or one")
+
+    size_x = round(
+        _uniform_size(rng, profile, "double_blocker_size_x"),
+        6,
+    )
+    size_y = round(
+        _uniform_size(rng, profile, "double_blocker_size_y"),
+        6,
+    )
+    size_z = round(_uniform_size(rng, profile, "size_z"), 6)
+
+    start, goal = config["start"], config["goal"]
+    x0, y0 = float(start["x"]), float(start["y"])
+    x1, y1 = float(goal["x"]), float(goal["y"])
+    length = max(math.hypot(x1 - x0, y1 - y0), 1e-9)
+    normal_x = -(y1 - y0) / length
+    normal_y = (x1 - x0) / length
+
+    fraction_low, fraction_high = map(float, fraction_ranges[slot])
+    fraction = rng.uniform(fraction_low, fraction_high)
+    offset_low, offset_high = map(
+        float,
+        profile["double_blocker_offset"],
+    )
+    offset = rng.uniform(offset_low, offset_high)
+    if slot == 1:
+        offset = -offset
+    offset *= side_sign
+
+    x = x0 + fraction * (x1 - x0) + normal_x * offset
+    y = y0 + fraction * (y1 - y0) + normal_y * offset
+    return Box(
+        name=name,
+        x=round(x, 6),
+        y=round(y, 6),
+        z=size_z / 2.0,
+        size_x=size_x,
+        size_y=size_y,
+        size_z=size_z,
+    )
+
+
 def generate_boxes(
     config: dict[str, Any],
     seed: int,
@@ -526,12 +582,20 @@ def generate_boxes(
     generation = config["generation"]
     max_world_attempts = int(generation["max_world_attempts"])
     max_placement_attempts = int(generation["max_placement_attempts"])
-    valid_scenarios = {None, "random", "clear", "direct_block"}
+    valid_scenarios = {
+        None,
+        "random",
+        "clear",
+        "direct_block",
+        "double_block",
+    }
     if scenario not in valid_scenarios:
         raise ValueError(
-            f"unknown scenario {scenario!r}; choose random, clear or direct_block"
+            f"unknown scenario {scenario!r}; choose random, clear, "
+            "direct_block or double_block"
         )
-    structured_blocker = scenario == "direct_block"
+    structured_blocker = scenario in ("direct_block", "double_block")
+    structured_blocker_count = 2 if scenario == "double_block" else 1
     require_blocker = (
         structured_blocker
         or (
@@ -546,12 +610,22 @@ def generate_boxes(
         active_config = _config_with_episode_geometry(rng, config)
         boundary_walls = make_boundary_walls(active_config)
         placed: list[Box] = list(boundary_walls)
+        double_side_sign = -1.0 if rng.random() < 0.5 else 1.0
         success = True
         for index in range(count):
             placed_this_box = False
-            direct = require_blocker and index == 0
+            direct = require_blocker and index < structured_blocker_count
             for _ in range(max_placement_attempts):
-                if structured_blocker and direct:
+                if scenario == "double_block" and direct:
+                    candidate = _double_blocker_candidate(
+                        rng,
+                        profile,
+                        active_config,
+                        f"box_{index:03d}",
+                        slot=index,
+                        side_sign=double_side_sign,
+                    )
+                elif structured_blocker and direct:
                     candidate = _structured_blocker_candidate(
                         rng,
                         profile,
@@ -607,6 +681,9 @@ def generate_boxes(
             "boundary_wall_count": len(boundary_walls),
             "total_box_count": len(placed),
             "scenario": scenario or "random",
+            "structured_blocker_count": (
+                structured_blocker_count if require_blocker else 0
+            ),
             "direct_path_blocked": blocked,
             "straight_distance_m": round(straight_distance, 4),
             "astar_path_length_m": round(path_length, 4),

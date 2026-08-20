@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-obstacles", type=int, default=None)
     parser.add_argument(
         "--scenario",
-        choices=("random", "clear", "direct_block"),
+        choices=("random", "clear", "direct_block", "double_block"),
         default=None,
     )
     parser.add_argument("--force", action="store_true", help="allow overwriting output files")
