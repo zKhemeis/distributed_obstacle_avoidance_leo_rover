@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import (
     CallbackList,
@@ -21,6 +22,25 @@ def _positive(value: int, name: str) -> int:
     if value <= 0:
         raise ValueError(f'{name} must be positive')
     return value
+
+
+def _reset_linear_action_head(
+    model: PPO,
+    initial_bias: float,
+) -> None:
+    """Reset only the forward-speed row of the Gaussian action mean."""
+    if not -1.0 < initial_bias < 1.0:
+        raise ValueError('linear action initial bias must be in (-1, 1)')
+
+    action_net = model.policy.action_net
+    if action_net.out_features != 2:
+        raise ValueError(
+            'Expected a two-output continuous action head, got '
+            f'{action_net.out_features}')
+
+    with torch.no_grad():
+        action_net.weight[0].zero_()
+        action_net.bias[0].fill_(initial_bias)
 
 
 def main() -> None:
@@ -41,7 +61,29 @@ def main() -> None:
             'A new optimizer and timestep counter are still created.'
         ),
     )
+    parser.add_argument(
+        '--reset-linear-action-head',
+        action='store_true',
+        help=(
+            'After loading --initial-model, reset only the forward-speed '
+            'action-mean row so it can be relearned without clipping.'
+        ),
+    )
+    parser.add_argument(
+        '--linear-action-initial-bias',
+        type=float,
+        default=0.5,
+        help=(
+            'Raw normalized forward-action mean used with '
+            '--reset-linear-action-head. Default 0.5 maps to 75 percent '
+            'of linear_speed_max.'
+        ),
+    )
     args = parser.parse_args()
+
+    if args.reset_linear_action_head and not args.initial_model:
+        raise ValueError(
+            '--reset-linear-action-head requires --initial-model')
 
     config = load_config(args.config)
     training = config['training']
@@ -160,6 +202,15 @@ def main() -> None:
             initial_model.policy.state_dict(),
             strict=True,
         )
+        if args.reset_linear_action_head:
+            _reset_linear_action_head(
+                model,
+                args.linear_action_initial_bias,
+            )
+            print(
+                'reset_linear_action_head=true '
+                f'initial_bias={args.linear_action_initial_bias}'
+            )
         initial_model_timesteps = int(initial_model.num_timesteps)
         print(
             f'initialized_policy={initial_model_path} '
@@ -181,6 +232,12 @@ def main() -> None:
                 else str(initial_model_path)
             ),
             'initial_model_timesteps': initial_model_timesteps,
+            'reset_linear_action_head': bool(
+                args.reset_linear_action_head),
+            'linear_action_initial_bias': (
+                float(args.linear_action_initial_bias)
+                if args.reset_linear_action_head else None
+            ),
         },
     }
     with (run_directory / 'resolved_config.json').open(
