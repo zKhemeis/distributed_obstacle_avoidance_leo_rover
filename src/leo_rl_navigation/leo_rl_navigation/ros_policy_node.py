@@ -50,6 +50,8 @@ class RosPolicyNode(Node):
         self.maximum_goal_distance = float(
             self.declare_parameter(
                 'maximum_goal_distance', math.sqrt(200.0)).value)
+        self.front_half_angle_deg = float(
+            self.declare_parameter('front_half_angle_deg', 30.0).value)
         self.linear_speed_max = float(
             self.declare_parameter('linear_speed_max', 0.25).value)
         self.angular_speed_max = float(
@@ -182,6 +184,9 @@ class RosPolicyNode(Node):
             range_min=self.range_min,
             range_max=self.range_max,
             maximum_goal_distance=self.maximum_goal_distance,
+            angle_min=self.latest_scan.angle_min,
+            angle_increment=self.latest_scan.angle_increment,
+            front_half_angle_deg=self.front_half_angle_deg,
         )
 
         if measurements['distance_to_goal'] <= self.goal_tolerance:
@@ -216,6 +221,7 @@ class RosPolicyNode(Node):
             f'step={self.episode_step} '
             f'distance={measurements["distance_to_goal"]:.3f} '
             f'min_scan={measurements["minimum_scan"]:.3f} '
+            f'front_scan={measurements["front_minimum_scan"]:.3f} '
             f'v={linear_velocity:.3f} w={angular_velocity:.3f}',
             throttle_duration_sec=1.0,
         )

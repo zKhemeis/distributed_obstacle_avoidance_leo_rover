@@ -90,6 +90,7 @@ def _launch_scenario(context):
         '-p', 'range_min:=0.05',
         '-p', 'range_max:=12.0',
         '-p', 'maximum_goal_distance:=14.1421356237',
+        '-p', 'front_half_angle_deg:=30.0',
         '-p', 'linear_speed_max:=0.25',
         '-p', 'angular_speed_max:=0.80',
         '-p', 'goal_tolerance:=0.25',

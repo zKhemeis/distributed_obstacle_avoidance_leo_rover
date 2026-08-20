@@ -26,6 +26,9 @@ def build_observation(
     range_min: float,
     range_max: float,
     maximum_goal_distance: float,
+    angle_min: float = 0.0,
+    angle_increment: float | None = None,
+    front_half_angle_deg: float = 30.0,
 ) -> tuple[np.ndarray, dict[str, float]]:
     """Create the policy observation used by both Gym and ROS."""
     if number_of_rays <= 0 or n_sectors <= 0:
@@ -37,6 +40,15 @@ def build_observation(
         raise ValueError('LiDAR range limits are invalid')
     if maximum_goal_distance <= 0.0:
         raise ValueError('maximum_goal_distance must be positive')
+    if not 0.0 < front_half_angle_deg < 180.0:
+        raise ValueError('front_half_angle_deg must be in (0, 180)')
+
+    if angle_increment is None:
+        angle_increment = 2.0 * math.pi / number_of_rays
+    if not math.isfinite(angle_min):
+        raise ValueError('LiDAR angle_min must be finite')
+    if not math.isfinite(angle_increment) or angle_increment <= 0.0:
+        raise ValueError('LiDAR angle_increment must be finite and positive')
 
     range_array = np.asarray(ranges, dtype=np.float32)
     if range_array.shape != (number_of_rays,):
@@ -48,8 +60,27 @@ def build_observation(
     range_array = range_array.copy()
     range_array[np.isposinf(range_array)] = range_max
     range_array = np.clip(range_array, range_min, range_max)
-    sector_ranges = range_array.reshape(n_sectors, -1).min(axis=1)
+
+    # Canonicalize every scanner so index zero points forward. Bullet scans
+    # start at zero radians, while many real LaserScan messages start at -pi.
+    front_index = int(round(-angle_min / angle_increment)) % number_of_rays
+    canonical_ranges = np.roll(range_array, -front_index)
+    sector_ranges = canonical_ranges.reshape(n_sectors, -1).min(axis=1)
     normalized_ranges = sector_ranges / range_max
+
+    front_half_rays = max(
+        1,
+        int(math.ceil(
+            math.radians(front_half_angle_deg) / angle_increment)),
+    )
+    front_half_rays = min(front_half_rays, number_of_rays // 2)
+    if front_half_rays == number_of_rays // 2:
+        front_ranges = canonical_ranges
+    else:
+        front_ranges = np.concatenate((
+            canonical_ranges[:front_half_rays + 1],
+            canonical_ranges[-front_half_rays:],
+        ))
 
     delta_x = float(goal_x - pose_x)
     delta_y = float(goal_y - pose_y)
@@ -70,7 +101,8 @@ def build_observation(
     measurements = {
         'distance_to_goal': float(distance),
         'relative_bearing': float(relative_bearing),
-        'minimum_scan': float(range_array.min()),
+        'minimum_scan': float(canonical_ranges.min()),
+        'front_minimum_scan': float(front_ranges.min()),
         'pose_x': float(pose_x),
         'pose_y': float(pose_y),
         'pose_yaw': float(pose_yaw),

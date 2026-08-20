@@ -85,6 +85,21 @@ class SafetyObjectiveTests(unittest.TestCase):
         self.assertLess(info['reward_unsafe_speed'], 0.0)
         environment.close()
 
+    def test_front_obstacle_penalizes_forward_speed(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            front_half_angle_deg=30.0,
+            front_safety_distance=3.0,
+            front_unsafe_speed_penalty_weight=1.0,
+        )
+        environment.reset()
+        forward = np.array([1.0, 0.0], dtype=np.float32)
+        _, _, _, _, info = environment.step(forward)
+        self.assertLess(info['front_minimum_scan'], 3.0)
+        self.assertLess(info['reward_front_unsafe_speed'], 0.0)
+        self.assertAlmostEqual(info['command_linear'], 0.25)
+        environment.close()
+
     def test_stuck_motion_terminates_episode(self) -> None:
         environment = LeoRoverEnv(
             self.manifest,

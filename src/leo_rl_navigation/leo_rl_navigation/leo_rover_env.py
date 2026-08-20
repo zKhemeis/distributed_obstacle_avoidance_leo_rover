@@ -46,6 +46,9 @@ class LeoRoverEnv(gym.Env):
         safety_distance: float = 0.0,
         proximity_penalty_weight: float = 0.0,
         unsafe_speed_penalty_weight: float = 0.0,
+        front_half_angle_deg: float = 30.0,
+        front_safety_distance: float = 0.0,
+        front_unsafe_speed_penalty_weight: float = 0.0,
         stuck_window_steps: int = 0,
         stuck_displacement_threshold: float = 0.05,
         stuck_yaw_threshold: float = 0.10,
@@ -71,6 +74,9 @@ class LeoRoverEnv(gym.Env):
             'safety_distance': safety_distance,
             'proximity_penalty_weight': proximity_penalty_weight,
             'unsafe_speed_penalty_weight': unsafe_speed_penalty_weight,
+            'front_safety_distance': front_safety_distance,
+            'front_unsafe_speed_penalty_weight': (
+                front_unsafe_speed_penalty_weight),
             'stuck_displacement_threshold': stuck_displacement_threshold,
             'stuck_yaw_threshold': stuck_yaw_threshold,
             'stuck_minimum_command_speed': stuck_minimum_command_speed,
@@ -81,6 +87,8 @@ class LeoRoverEnv(gym.Env):
                 raise ValueError(f'{name} must be non-negative')
         if stuck_window_steps < 0:
             raise ValueError('stuck_window_steps must be non-negative')
+        if not 0.0 < front_half_angle_deg < 180.0:
+            raise ValueError('front_half_angle_deg must be in (0, 180)')
 
         self.manifest_path = Path(manifest_path).expanduser().resolve()
         self.split = split
@@ -99,6 +107,10 @@ class LeoRoverEnv(gym.Env):
         self.proximity_penalty_weight = float(proximity_penalty_weight)
         self.unsafe_speed_penalty_weight = float(
             unsafe_speed_penalty_weight)
+        self.front_half_angle_deg = float(front_half_angle_deg)
+        self.front_safety_distance = float(front_safety_distance)
+        self.front_unsafe_speed_penalty_weight = float(
+            front_unsafe_speed_penalty_weight)
         self.stuck_window_steps = int(stuck_window_steps)
         self.stuck_displacement_threshold = float(
             stuck_displacement_threshold)
@@ -254,6 +266,8 @@ class LeoRoverEnv(gym.Env):
         self._episode_steps += 1
 
         observation, measurements = self._observation_and_measurements()
+        measurements['command_linear'] = float(linear_velocity)
+        measurements['command_angular'] = float(angular_velocity)
         distance = measurements['distance_to_goal']
         collision = bool(self._simulation.has_collision())
         success = bool(distance <= self.goal_tolerance and not collision)
@@ -289,10 +303,21 @@ class LeoRoverEnv(gym.Env):
         reward_unsafe_speed = (
             -self.unsafe_speed_penalty_weight *
             normalized_linear_speed * clearance_ratio)
+        front_clearance_ratio = 0.0
+        if self.front_safety_distance > 0.0:
+            front_clearance_ratio = max(
+                0.0,
+                (self.front_safety_distance -
+                 measurements['front_minimum_scan']) /
+                self.front_safety_distance,
+            )
+        reward_front_unsafe_speed = (
+            -self.front_unsafe_speed_penalty_weight *
+            normalized_linear_speed * front_clearance_ratio)
         reward = (
             reward_progress + reward_time + reward_goal + reward_collision +
             reward_timeout + reward_stuck + reward_proximity +
-            reward_unsafe_speed)
+            reward_unsafe_speed + reward_front_unsafe_speed)
         self._previous_distance = distance
 
         if terminated or truncated:
@@ -307,6 +332,8 @@ class LeoRoverEnv(gym.Env):
             'reward_stuck': float(reward_stuck),
             'reward_proximity': float(reward_proximity),
             'reward_unsafe_speed': float(reward_unsafe_speed),
+            'reward_front_unsafe_speed': float(
+                reward_front_unsafe_speed),
         }
         info = self._build_info(
             measurements,
@@ -355,6 +382,9 @@ class LeoRoverEnv(gym.Env):
             range_min=LIDAR_RANGE_MIN,
             range_max=LIDAR_RANGE_MAX,
             maximum_goal_distance=self.maximum_goal_distance,
+            angle_min=scan.angle_min,
+            angle_increment=scan.angle_increment,
+            front_half_angle_deg=self.front_half_angle_deg,
         )
 
     def _build_info(

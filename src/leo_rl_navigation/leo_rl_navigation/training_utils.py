@@ -19,6 +19,9 @@ INFO_KEYWORDS = (
     'stuck',
     'distance_to_goal',
     'minimum_scan',
+    'front_minimum_scan',
+    'command_linear',
+    'command_angular',
 )
 
 

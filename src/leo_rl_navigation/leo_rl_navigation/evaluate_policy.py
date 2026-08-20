@@ -29,7 +29,10 @@ RESULT_FIELDS = (
     'episode_return',
     'path_length_m',
     'minimum_scan_m',
+    'minimum_front_scan_m',
     'mean_linear_speed_mps',
+    'front_blocked_steps',
+    'mean_front_blocked_linear_speed_mps',
     'mean_abs_angular_speed_rps',
     'final_distance_m',
 )
@@ -95,7 +98,9 @@ def main() -> None:
         episode_return = 0.0
         path_length = 0.0
         minimum_scan = info['minimum_scan']
+        minimum_front_scan = info['front_minimum_scan']
         linear_speeds: list[float] = []
+        front_blocked_linear_speeds: list[float] = []
         angular_speeds: list[float] = []
 
         while True:
@@ -116,10 +121,18 @@ def main() -> None:
             previous_x = info['pose_x']
             previous_y = info['pose_y']
             minimum_scan = min(minimum_scan, info['minimum_scan'])
-            linear_speeds.append(
-                (float(action[0]) + 1.0) * 0.5 *
-                environment.linear_speed_max
+            minimum_front_scan = min(
+                minimum_front_scan,
+                info['front_minimum_scan'],
             )
+            linear_speed = float(info['command_linear'])
+            linear_speeds.append(linear_speed)
+            if (
+                environment.front_safety_distance > 0.0 and
+                info['front_minimum_scan'] <
+                environment.front_safety_distance
+            ):
+                front_blocked_linear_speeds.append(linear_speed)
             angular_speeds.append(
                 abs(float(action[1]) * environment.angular_speed_max)
             )
@@ -142,8 +155,15 @@ def main() -> None:
             'episode_return': round(episode_return, 6),
             'path_length_m': round(path_length, 6),
             'minimum_scan_m': round(minimum_scan, 6),
+            'minimum_front_scan_m': round(minimum_front_scan, 6),
             'mean_linear_speed_mps': round(
                 float(np.mean(linear_speeds)), 6),
+            'front_blocked_steps': len(front_blocked_linear_speeds),
+            'mean_front_blocked_linear_speed_mps': round(
+                float(np.mean(front_blocked_linear_speeds))
+                if front_blocked_linear_speeds else 0.0,
+                6,
+            ),
             'mean_abs_angular_speed_rps': round(
                 float(np.mean(angular_speeds)), 6),
             'final_distance_m': round(info['distance_to_goal'], 6),
