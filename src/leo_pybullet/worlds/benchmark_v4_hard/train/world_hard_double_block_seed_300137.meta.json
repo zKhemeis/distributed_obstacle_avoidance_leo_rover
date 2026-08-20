@@ -1,0 +1,27 @@
+{
+  "astar_path_length_m": 6.9747,
+  "boundary_wall_count": 4,
+  "difficulty": "hard",
+  "direct_path_blocked": true,
+  "generation_attempt": 1,
+  "goal": {
+    "exclusion_radius": 0.6,
+    "x": -4.053762,
+    "y": -1.27849
+  },
+  "path_stretch_ratio": 1.2361,
+  "random_obstacle_count": 12,
+  "robot_inflation_radius_m": 0.4159,
+  "scenario": "double_block",
+  "seed": 300137,
+  "start": {
+    "exclusion_radius": 0.65,
+    "x": -1.375568,
+    "y": 3.688127,
+    "yaw": -2.033559
+  },
+  "straight_distance_m": 5.6427,
+  "structured_blocker_count": 2,
+  "total_box_count": 16,
+  "world_file": "/root/leo_ws/src/leo_pybullet/worlds/benchmark_v4_hard/train/world_hard_double_block_seed_300137.yaml"
+}
