@@ -60,6 +60,16 @@ def main() -> None:
         ("test", args.test, args.test_seed_base),
     )
     difficulties = ("easy", "medium", "hard")
+    curriculum = config.get("curriculum", {})
+    curriculum_enabled = bool(curriculum.get("enabled", False))
+    scenario_cycle = tuple(
+        str(value) for value in curriculum.get(
+            "scenario_cycle",
+            ("random",),
+        )
+    )
+    if not scenario_cycle:
+        raise ValueError("curriculum scenario_cycle cannot be empty")
 
     for split, amount, seed_base in split_specs:
         split_dir = args.output_root / split
@@ -67,8 +77,20 @@ def main() -> None:
         for index in range(amount):
             seed = seed_base + index
             difficulty = difficulties[index % len(difficulties)]
-            boxes, metadata = generate_boxes(config, seed, difficulty)
-            world_path = split_dir / f"world_{difficulty}_seed_{seed:06d}.yaml"
+            scenario = (
+                scenario_cycle[index % len(scenario_cycle)]
+                if curriculum_enabled else None
+            )
+            boxes, metadata = generate_boxes(
+                config,
+                seed,
+                difficulty,
+                scenario=scenario,
+            )
+            scenario_label = metadata["scenario"]
+            world_path = split_dir / (
+                f"world_{difficulty}_{scenario_label}_seed_{seed:06d}.yaml"
+            )
             write_world(world_path, boxes)
             metadata["world_file"] = str(world_path.resolve())
             write_metadata(world_path.with_suffix(".meta.json"), metadata)
@@ -78,11 +100,14 @@ def main() -> None:
                     "world_file": str(world_path.resolve()),
                     "seed": seed,
                     "difficulty": difficulty,
+                    "scenario": metadata["scenario"],
                     "random_obstacle_count": metadata["random_obstacle_count"],
                     "boundary_wall_count": metadata["boundary_wall_count"],
                     "total_box_count": metadata["total_box_count"],
                     "direct_path_blocked": metadata["direct_path_blocked"],
+                    "straight_distance_m": metadata["straight_distance_m"],
                     "astar_path_length_m": metadata["astar_path_length_m"],
+                    "path_stretch_ratio": metadata["path_stretch_ratio"],
                     "start_x": metadata["start"]["x"],
                     "start_y": metadata["start"]["y"],
                     "start_yaw": metadata["start"]["yaw"],
@@ -112,6 +137,7 @@ def main() -> None:
         "start_goal_randomization": config.get(
             "start_goal_randomization", {"enabled": False}
         ),
+        "curriculum": curriculum,
     }
     with (args.output_root / "dataset_info.json").open("w", encoding="utf-8") as stream:
         json.dump(dataset_info, stream, indent=2)

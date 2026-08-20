@@ -386,8 +386,27 @@ def _config_with_episode_geometry(
         if minimum_distance <= distance <= maximum_distance:
             start["x"] = round(start_x, 6)
             start["y"] = round(start_y, 6)
-            if bool(settings.get("randomize_start_yaw", True)):
-                start["yaw"] = round(rng.uniform(-math.pi, math.pi), 6)
+            yaw_mode = str(settings.get("start_yaw_mode", "random"))
+            if yaw_mode == "face_goal":
+                jitter = math.radians(
+                    float(settings.get("start_yaw_jitter_deg", 0.0))
+                )
+                heading = math.atan2(goal_y - start_y, goal_x - start_x)
+                yaw = heading + rng.uniform(-jitter, jitter)
+                start["yaw"] = round(
+                    math.atan2(
+                        math.sin(yaw),
+                        math.cos(yaw),
+                    ),
+                    6,
+                )
+            elif yaw_mode == "random":
+                if bool(settings.get("randomize_start_yaw", True)):
+                    start["yaw"] = round(rng.uniform(-math.pi, math.pi), 6)
+            else:
+                raise ValueError(
+                    "start_yaw_mode must be either 'random' or 'face_goal'"
+                )
             goal["x"] = round(goal_x, 6)
             goal["y"] = round(goal_y, 6)
             return active
@@ -442,8 +461,56 @@ def _random_candidate(
     )
 
 
+def _structured_blocker_candidate(
+    rng: random.Random,
+    profile: dict[str, Any],
+    config: dict[str, Any],
+    name: str,
+) -> Box:
+    """Place a substantial obstacle directly between start and goal."""
+    size_x = round(
+        _uniform_size(rng, profile, "structured_blocker_size_x"),
+        6,
+    )
+    size_y = round(
+        _uniform_size(rng, profile, "structured_blocker_size_y"),
+        6,
+    )
+    size_z = round(_uniform_size(rng, profile, "size_z"), 6)
+
+    start, goal = config["start"], config["goal"]
+    x0, y0 = float(start["x"]), float(start["y"])
+    x1, y1 = float(goal["x"]), float(goal["y"])
+    fraction_low, fraction_high = map(
+        float,
+        profile["structured_blocker_fraction"],
+    )
+    fraction = rng.uniform(fraction_low, fraction_high)
+    length = max(math.hypot(x1 - x0, y1 - y0), 1e-9)
+    normal_x = -(y1 - y0) / length
+    normal_y = (x1 - x0) / length
+    maximum_offset = float(profile.get("structured_blocker_offset", 0.04))
+    offset = rng.uniform(-maximum_offset, maximum_offset)
+
+    x = x0 + fraction * (x1 - x0) + normal_x * offset
+    y = y0 + fraction * (y1 - y0) + normal_y * offset
+    return Box(
+        name=name,
+        x=round(x, 6),
+        y=round(y, 6),
+        z=size_z / 2.0,
+        size_x=size_x,
+        size_y=size_y,
+        size_z=size_z,
+    )
+
+
 def generate_boxes(
-    config: dict[str, Any], seed: int, difficulty: str, count_override: int | None = None
+    config: dict[str, Any],
+    seed: int,
+    difficulty: str,
+    count_override: int | None = None,
+    scenario: str | None = None,
 ) -> tuple[list[Box], dict[str, Any]]:
     if difficulty not in config["difficulties"]:
         valid = ", ".join(sorted(config["difficulties"]))
@@ -459,7 +526,21 @@ def generate_boxes(
     generation = config["generation"]
     max_world_attempts = int(generation["max_world_attempts"])
     max_placement_attempts = int(generation["max_placement_attempts"])
-    require_blocker = count > 0 and rng.random() < float(profile.get("direct_block_probability", 0.0))
+    valid_scenarios = {None, "random", "clear", "direct_block"}
+    if scenario not in valid_scenarios:
+        raise ValueError(
+            f"unknown scenario {scenario!r}; choose random, clear or direct_block"
+        )
+    structured_blocker = scenario == "direct_block"
+    require_blocker = (
+        structured_blocker
+        or (
+            scenario in (None, "random")
+            and count > 0
+            and rng.random()
+            < float(profile.get("direct_block_probability", 0.0))
+        )
+    )
 
     for world_attempt in range(1, max_world_attempts + 1):
         active_config = _config_with_episode_geometry(rng, config)
@@ -470,13 +551,21 @@ def generate_boxes(
             placed_this_box = False
             direct = require_blocker and index == 0
             for _ in range(max_placement_attempts):
-                candidate = _random_candidate(
-                    rng,
-                    profile,
-                    active_config,
-                    f"box_{index:03d}",
-                    direct_blocker=direct,
-                )
+                if structured_blocker and direct:
+                    candidate = _structured_blocker_candidate(
+                        rng,
+                        profile,
+                        active_config,
+                        f"box_{index:03d}",
+                    )
+                else:
+                    candidate = _random_candidate(
+                        rng,
+                        profile,
+                        active_config,
+                        f"box_{index:03d}",
+                        direct_blocker=direct,
+                    )
                 if candidate_is_valid(candidate, placed, active_config):
                     placed.append(candidate)
                     placed_this_box = True
@@ -490,21 +579,38 @@ def generate_boxes(
         errors, path = validate_boxes(placed, active_config)
         if errors or path is None:
             continue
-        if require_blocker and not direct_path_blocked(placed, active_config):
+        blocked = direct_path_blocked(placed, active_config)
+        if require_blocker and not blocked:
+            continue
+        if scenario == "clear" and blocked:
             continue
 
+        start = active_config["start"]
+        goal = active_config["goal"]
+        straight_distance = math.hypot(
+            float(goal["x"]) - float(start["x"]),
+            float(goal["y"]) - float(start["y"]),
+        )
         path_length = sum(
             math.hypot(x1 - x0, y1 - y0)
             for (x0, y0), (x1, y1) in zip(path, path[1:])
         )
+        path_stretch = path_length / max(straight_distance, 1e-9)
+        if structured_blocker and path_stretch < float(
+            profile.get("minimum_path_stretch", 1.0)
+        ):
+            continue
         metadata = {
             "seed": seed,
             "difficulty": difficulty,
             "random_obstacle_count": count,
             "boundary_wall_count": len(boundary_walls),
             "total_box_count": len(placed),
-            "direct_path_blocked": direct_path_blocked(placed, active_config),
+            "scenario": scenario or "random",
+            "direct_path_blocked": blocked,
+            "straight_distance_m": round(straight_distance, 4),
             "astar_path_length_m": round(path_length, 4),
+            "path_stretch_ratio": round(path_stretch, 4),
             "generation_attempt": world_attempt,
             "start": active_config["start"],
             "goal": active_config["goal"],

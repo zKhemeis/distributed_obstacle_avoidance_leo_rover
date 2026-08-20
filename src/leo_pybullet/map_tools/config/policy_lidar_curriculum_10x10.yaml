@@ -1,0 +1,85 @@
+arena:
+  x_min: -5.0
+  x_max: 5.0
+  y_min: -5.0
+  y_max: 5.0
+  boundary_margin: 0.10
+
+boundary_walls:
+  enabled: true
+  thickness: 0.12
+  height: 0.45
+
+start:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  exclusion_radius: 0.65
+
+goal:
+  x: 3.0
+  y: 0.0
+  exclusion_radius: 0.60
+
+start_goal_randomization:
+  enabled: true
+  minimum_distance: 3.5
+  maximum_distance: 8.0
+  boundary_clearance: 0.75
+  start_yaw_mode: face_goal
+  start_yaw_jitter_deg: 5.0
+  max_sampling_attempts: 2000
+
+robot:
+  length: 0.47
+  width: 0.48
+  safety_margin: 0.08
+
+planner:
+  resolution: 0.08
+  allow_diagonal: true
+
+generation:
+  inter_obstacle_gap: 0.12
+  max_placement_attempts: 3000
+  max_world_attempts: 500
+
+curriculum:
+  enabled: true
+  # Three direct-block lessons followed by one clear navigation lesson.
+  scenario_cycle: [direct_block, direct_block, direct_block, clear]
+
+difficulties:
+  easy:
+    obstacle_count: [1, 2]
+    size_x: [0.25, 0.50]
+    size_y: [0.25, 0.50]
+    size_z: [0.25, 0.60]
+    direct_block_probability: 0.0
+    structured_blocker_size_x: [0.65, 0.85]
+    structured_blocker_size_y: [0.65, 0.85]
+    structured_blocker_fraction: [0.30, 0.55]
+    structured_blocker_offset: 0.03
+    minimum_path_stretch: 1.03
+  medium:
+    obstacle_count: [2, 4]
+    size_x: [0.25, 0.65]
+    size_y: [0.25, 0.65]
+    size_z: [0.25, 0.75]
+    direct_block_probability: 0.0
+    structured_blocker_size_x: [0.80, 1.05]
+    structured_blocker_size_y: [0.80, 1.05]
+    structured_blocker_fraction: [0.30, 0.55]
+    structured_blocker_offset: 0.03
+    minimum_path_stretch: 1.06
+  hard:
+    obstacle_count: [4, 6]
+    size_x: [0.30, 0.75]
+    size_y: [0.30, 0.75]
+    size_z: [0.30, 0.85]
+    direct_block_probability: 0.0
+    structured_blocker_size_x: [0.95, 1.20]
+    structured_blocker_size_y: [0.95, 1.20]
+    structured_blocker_fraction: [0.28, 0.52]
+    structured_blocker_offset: 0.02
+    minimum_path_stretch: 1.10

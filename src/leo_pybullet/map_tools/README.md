@@ -143,6 +143,32 @@ The dataset script refuses to overwrite an existing manifest or results file.
 Use a new dataset version such as `benchmark_v2` when the configuration changes.
 Only use `--force` when you intentionally want to replace an unneeded dataset.
 
+### LiDAR curriculum worlds
+
+`policy_lidar_curriculum_10x10.yaml` creates a deterministic mixture of two
+labelled scenarios:
+
+- `direct_block`: the rover initially faces the goal, a substantial obstacle
+  blocks the direct route, an A* detour exists, and a minimum path-stretch
+  ratio is enforced.
+- `clear`: the direct route is verified to remain open so the policy retains
+  efficient goal-directed motion.
+
+Generate a curriculum dataset in a new output directory; never overwrite an
+existing benchmark:
+
+```bash
+python3 scripts/generate_dataset.py \
+  --config config/policy_lidar_curriculum_10x10.yaml \
+  --output-root /root/leo_ws/src/leo_pybullet/worlds/benchmark_v3_curriculum \
+  --train 300 \
+  --validation 60 \
+  --test 90
+```
+
+The scenario label, straight-line distance, A* path length and path-stretch
+ratio are recorded in both metadata and `manifest.csv`.
+
 ## 10. Evaluation files
 
 `generate_dataset.py` creates:
