@@ -34,6 +34,13 @@ def main() -> None:
     parser.add_argument('--evaluation-episodes', type=int)
     parser.add_argument('--seed', type=int)
     parser.add_argument('--device', default='cpu')
+    parser.add_argument(
+        '--initial-model',
+        help=(
+            'Optional PPO model whose policy parameters initialize this run. '
+            'A new optimizer and timestep counter are still created.'
+        ),
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -126,12 +133,38 @@ def main() -> None:
         ent_coef=float(ppo_config['ent_coef']),
         vf_coef=float(ppo_config['vf_coef']),
         max_grad_norm=float(ppo_config['max_grad_norm']),
+        target_kl=(
+            None if ppo_config.get('target_kl') is None
+            else float(ppo_config['target_kl'])
+        ),
         policy_kwargs=policy_kwargs,
         tensorboard_log=str(tensorboard_directory),
         seed=seed,
         device=args.device,
         verbose=1,
     )
+
+    initial_model_path = None
+    initial_model_timesteps = None
+    if args.initial_model:
+        initial_model_path = Path(args.initial_model).expanduser().resolve()
+        if not initial_model_path.is_file():
+            raise FileNotFoundError(
+                f'Initial model does not exist: {initial_model_path}')
+        initial_model = PPO.load(initial_model_path, device=args.device)
+        if initial_model.observation_space != model.observation_space:
+            raise ValueError('Initial model observation space is incompatible')
+        if initial_model.action_space != model.action_space:
+            raise ValueError('Initial model action space is incompatible')
+        model.policy.load_state_dict(
+            initial_model.policy.state_dict(),
+            strict=True,
+        )
+        initial_model_timesteps = int(initial_model.num_timesteps)
+        print(
+            f'initialized_policy={initial_model_path} '
+            f'source_timesteps={initial_model_timesteps}'
+        )
 
     resolved = {
         'config': config,
@@ -143,6 +176,11 @@ def main() -> None:
             'checkpoint_frequency': checkpoint_frequency,
             'evaluation_episodes': evaluation_episodes,
             'device': args.device,
+            'initial_model': (
+                None if initial_model_path is None
+                else str(initial_model_path)
+            ),
+            'initial_model_timesteps': initial_model_timesteps,
         },
     }
     with (run_directory / 'resolved_config.json').open(
