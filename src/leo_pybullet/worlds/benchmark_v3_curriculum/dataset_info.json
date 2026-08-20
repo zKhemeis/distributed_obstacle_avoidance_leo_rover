@@ -1,0 +1,29 @@
+{
+  "config": "/root/leo_ws/src/leo_pybullet/map_tools/config/policy_lidar_curriculum_10x10.yaml",
+  "train": 300,
+  "validation": 60,
+  "test": 90,
+  "seed_bases": {
+    "train": 0,
+    "validation": 100000,
+    "test": 200000
+  },
+  "start_goal_randomization": {
+    "enabled": true,
+    "minimum_distance": 3.5,
+    "maximum_distance": 8.0,
+    "boundary_clearance": 0.75,
+    "start_yaw_mode": "face_goal",
+    "start_yaw_jitter_deg": 5.0,
+    "max_sampling_attempts": 2000
+  },
+  "curriculum": {
+    "enabled": true,
+    "scenario_cycle": [
+      "direct_block",
+      "direct_block",
+      "direct_block",
+      "clear"
+    ]
+  }
+}

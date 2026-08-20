@@ -1,0 +1,1 @@
+run_id,timestamp,split,world_file,seed,difficulty,policy_name,success,collision,timeout,duration_s,path_length_m,minimum_scan_m,mean_linear_speed_mps,mean_abs_angular_speed_rps,safety_interventions,notes

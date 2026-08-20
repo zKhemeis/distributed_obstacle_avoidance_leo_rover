@@ -1,0 +1,26 @@
+{
+  "astar_path_length_m": 5.1645,
+  "boundary_wall_count": 4,
+  "difficulty": "hard",
+  "direct_path_blocked": true,
+  "generation_attempt": 1,
+  "goal": {
+    "exclusion_radius": 0.6,
+    "x": -1.556126,
+    "y": 0.765026
+  },
+  "path_stretch_ratio": 1.2382,
+  "random_obstacle_count": 5,
+  "robot_inflation_radius_m": 0.4159,
+  "scenario": "direct_block",
+  "seed": 200065,
+  "start": {
+    "exclusion_radius": 0.65,
+    "x": 1.99185,
+    "y": -1.427772,
+    "yaw": 2.559038
+  },
+  "straight_distance_m": 4.1709,
+  "total_box_count": 9,
+  "world_file": "/root/leo_ws/src/leo_pybullet/worlds/benchmark_v3_curriculum/test/world_hard_direct_block_seed_200065.yaml"
+}
