@@ -67,6 +67,23 @@ class EnvironmentContractTests(unittest.TestCase):
         self.assertEqual(first_info['world_file'], second_info['world_file'])
         environment.close()
 
+    def test_explicit_front_clearance_contract(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            split='train',
+            include_front_clearance=True,
+            front_normalization_distance=0.80,
+        )
+        observation, info = environment.reset(seed=4)
+        self.assertEqual(observation.shape, (54,))
+        self.assertTrue(np.isfinite(observation).all())
+        self.assertTrue(environment.observation_space.contains(observation))
+        self.assertAlmostEqual(
+            float(observation[50]),
+            info['normalized_front_clearance'],
+        )
+        environment.close()
+
     def test_success_and_timeout_are_distinct(self) -> None:
         stop = np.array([-1.0, 0.0], dtype=np.float32)
         success_environment = LeoRoverEnv(self.manifest, split='train')

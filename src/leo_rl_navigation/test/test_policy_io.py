@@ -83,6 +83,38 @@ class PolicyIoTests(unittest.TestCase):
 
         self.assertAlmostEqual(measurements['front_minimum_scan'], 0.30)
 
+    def test_explicit_front_clearance_observation(self) -> None:
+        ranges = np.full(500, 12.0, dtype=np.float32)
+        ranges[:5] = 0.40
+        ranges[-5:] = 0.40
+
+        observation, measurements = build_observation(
+            ranges,
+            pose_x=0.0,
+            pose_y=0.0,
+            pose_yaw=0.0,
+            goal_x=1.0,
+            goal_y=0.0,
+            number_of_rays=500,
+            n_sectors=50,
+            range_min=0.05,
+            range_max=12.0,
+            maximum_goal_distance=math.sqrt(200.0),
+            include_front_clearance=True,
+            front_normalization_distance=0.80,
+        )
+
+        self.assertEqual(observation.shape, (54,))
+        self.assertAlmostEqual(float(observation[50]), 0.50)
+        self.assertAlmostEqual(
+            measurements['normalized_front_clearance'],
+            0.50,
+        )
+        self.assertAlmostEqual(
+            float(observation[51]),
+            1.0 / math.sqrt(200.0),
+        )
+
     def test_action_contract(self) -> None:
         linear, angular = action_to_command(
             np.array([-1.0, -1.0], dtype=np.float32),

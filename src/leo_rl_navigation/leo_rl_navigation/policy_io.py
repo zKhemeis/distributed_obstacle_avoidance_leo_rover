@@ -29,6 +29,8 @@ def build_observation(
     angle_min: float = 0.0,
     angle_increment: float | None = None,
     front_half_angle_deg: float = 30.0,
+    include_front_clearance: bool = False,
+    front_normalization_distance: float = 0.80,
 ) -> tuple[np.ndarray, dict[str, float]]:
     """Create the policy observation used by both Gym and ROS."""
     if number_of_rays <= 0 or n_sectors <= 0:
@@ -42,6 +44,8 @@ def build_observation(
         raise ValueError('maximum_goal_distance must be positive')
     if not 0.0 < front_half_angle_deg < 180.0:
         raise ValueError('front_half_angle_deg must be in (0, 180)')
+    if front_normalization_distance <= 0.0:
+        raise ValueError('front_normalization_distance must be positive')
 
     if angle_increment is None:
         angle_increment = 2.0 * math.pi / number_of_rays
@@ -89,20 +93,31 @@ def build_observation(
     relative_bearing = wrap_angle(goal_angle - pose_yaw)
     normalized_distance = min(distance / maximum_goal_distance, 1.0)
 
+    front_minimum_scan = float(front_ranges.min())
+    normalized_front_clearance = min(
+        front_minimum_scan / front_normalization_distance,
+        1.0,
+    )
+    navigation_features = [
+        normalized_distance,
+        math.sin(relative_bearing),
+        math.cos(relative_bearing),
+    ]
+    if include_front_clearance:
+        navigation_features.insert(0, normalized_front_clearance)
+
     observation = np.concatenate((
         normalized_ranges,
-        np.array([
-            normalized_distance,
-            math.sin(relative_bearing),
-            math.cos(relative_bearing),
-        ], dtype=np.float32),
+        np.asarray(navigation_features, dtype=np.float32),
     )).astype(np.float32, copy=False)
 
     measurements = {
         'distance_to_goal': float(distance),
         'relative_bearing': float(relative_bearing),
         'minimum_scan': float(canonical_ranges.min()),
-        'front_minimum_scan': float(front_ranges.min()),
+        'front_minimum_scan': front_minimum_scan,
+        'normalized_front_clearance': float(
+            normalized_front_clearance),
         'pose_x': float(pose_x),
         'pose_y': float(pose_y),
         'pose_yaw': float(pose_yaw),

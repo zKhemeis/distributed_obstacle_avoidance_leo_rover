@@ -54,6 +54,10 @@ def _launch_scenario(context):
         LaunchConfiguration('detailed_model').perform(context),
         'detailed_model',
     )
+    explicit_front_clearance = _boolean_argument(
+        LaunchConfiguration('explicit_front_clearance').perform(context),
+        'explicit_front_clearance',
+    )
 
     if not manifest.is_file():
         raise FileNotFoundError(f'Manifest does not exist: {manifest}')
@@ -91,6 +95,9 @@ def _launch_scenario(context):
         '-p', 'range_max:=12.0',
         '-p', 'maximum_goal_distance:=14.1421356237',
         '-p', 'front_half_angle_deg:=30.0',
+        '-p',
+        f'include_front_clearance:={str(explicit_front_clearance).lower()}',
+        '-p', 'front_normalization_distance:=0.80',
         '-p', 'linear_speed_max:=0.25',
         '-p', 'angular_speed_max:=0.80',
         '-p', 'goal_tolerance:=0.25',
@@ -109,7 +116,8 @@ def _launch_scenario(context):
             f'Benchmark {split}[{world_index}]: {world.name}; '
             f'start=({start_x:.6f}, {start_y:.6f}, {start_yaw:.6f}); '
             f'goal=({goal_x:.6f}, {goal_y:.6f}); '
-            f'detailed_model={detailed_model}')),
+            f'detailed_model={detailed_model}; '
+            f'explicit_front_clearance={explicit_front_clearance}')),
         Node(
             package='leo_pybullet',
             executable='pybullet_sim_node',
@@ -208,6 +216,13 @@ def generate_launch_description() -> LaunchDescription:
             description=(
                 'Show the detailed Leo mesh through robot_state_publisher. '
                 'This changes visualization only.'),
+        ),
+        DeclareLaunchArgument(
+            'explicit_front_clearance',
+            default_value='false',
+            description=(
+                'Use the 54-value observation containing explicit normalized '
+                'front clearance. Keep false for legacy 53-value policies.'),
         ),
         DeclareLaunchArgument('rviz', default_value='true'),
         OpaqueFunction(function=_launch_scenario),

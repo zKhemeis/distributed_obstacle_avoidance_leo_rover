@@ -47,6 +47,8 @@ class LeoRoverEnv(gym.Env):
         proximity_penalty_weight: float = 0.0,
         unsafe_speed_penalty_weight: float = 0.0,
         front_half_angle_deg: float = 30.0,
+        include_front_clearance: bool = False,
+        front_normalization_distance: float = 0.80,
         front_safety_distance: float = 0.0,
         front_unsafe_speed_penalty_weight: float = 0.0,
         stuck_window_steps: int = 0,
@@ -75,6 +77,7 @@ class LeoRoverEnv(gym.Env):
             'proximity_penalty_weight': proximity_penalty_weight,
             'unsafe_speed_penalty_weight': unsafe_speed_penalty_weight,
             'front_safety_distance': front_safety_distance,
+            'front_normalization_distance': front_normalization_distance,
             'front_unsafe_speed_penalty_weight': (
                 front_unsafe_speed_penalty_weight),
             'stuck_displacement_threshold': stuck_displacement_threshold,
@@ -108,6 +111,9 @@ class LeoRoverEnv(gym.Env):
         self.unsafe_speed_penalty_weight = float(
             unsafe_speed_penalty_weight)
         self.front_half_angle_deg = float(front_half_angle_deg)
+        self.include_front_clearance = bool(include_front_clearance)
+        self.front_normalization_distance = float(
+            front_normalization_distance)
         self.front_safety_distance = float(front_safety_distance)
         self.front_unsafe_speed_penalty_weight = float(
             front_unsafe_speed_penalty_weight)
@@ -132,12 +138,15 @@ class LeoRoverEnv(gym.Env):
         self._pose_history: deque[tuple[float, float, float]] = deque(
             maxlen=max(self.stuck_window_steps + 1, 1))
 
+        nonnegative_features = self.n_sectors + 1
+        if self.include_front_clearance:
+            nonnegative_features += 1
         observation_low = np.concatenate((
-            np.zeros(self.n_sectors + 1, dtype=np.float32),
+            np.zeros(nonnegative_features, dtype=np.float32),
             np.array([-1.0, -1.0], dtype=np.float32),
         ))
         observation_high = np.concatenate((
-            np.ones(self.n_sectors + 1, dtype=np.float32),
+            np.ones(nonnegative_features, dtype=np.float32),
             np.array([1.0, 1.0], dtype=np.float32),
         ))
         self.observation_space = spaces.Box(
@@ -385,6 +394,9 @@ class LeoRoverEnv(gym.Env):
             angle_min=scan.angle_min,
             angle_increment=scan.angle_increment,
             front_half_angle_deg=self.front_half_angle_deg,
+            include_front_clearance=self.include_front_clearance,
+            front_normalization_distance=(
+                self.front_normalization_distance),
         )
 
     def _build_info(

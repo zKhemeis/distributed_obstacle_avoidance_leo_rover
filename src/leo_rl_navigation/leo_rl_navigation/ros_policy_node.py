@@ -52,6 +52,12 @@ class RosPolicyNode(Node):
                 'maximum_goal_distance', math.sqrt(200.0)).value)
         self.front_half_angle_deg = float(
             self.declare_parameter('front_half_angle_deg', 30.0).value)
+        self.include_front_clearance = bool(
+            self.declare_parameter(
+                'include_front_clearance', False).value)
+        self.front_normalization_distance = float(
+            self.declare_parameter(
+                'front_normalization_distance', 0.80).value)
         self.linear_speed_max = float(
             self.declare_parameter('linear_speed_max', 0.25).value)
         self.angular_speed_max = float(
@@ -71,11 +77,13 @@ class RosPolicyNode(Node):
             raise ValueError('Control frequency and sensor timeout must be positive')
 
         self.model = PPO.load(str(self.model_path), device='cpu')
-        if self.model.observation_space.shape != (self.n_sectors + 3,):
+        expected_observation_size = (
+            self.n_sectors + 3 + int(self.include_front_clearance))
+        if self.model.observation_space.shape != (expected_observation_size,):
             raise ValueError(
                 'Model observation shape does not match the ROS configuration: '
                 f'{self.model.observation_space.shape} versus '
-                f'{(self.n_sectors + 3,)}')
+                f'{(expected_observation_size,)}')
         if self.model.action_space.shape != (2,):
             raise ValueError(
                 f'Expected a two-value action, got {self.model.action_space.shape}')
@@ -187,6 +195,9 @@ class RosPolicyNode(Node):
             angle_min=self.latest_scan.angle_min,
             angle_increment=self.latest_scan.angle_increment,
             front_half_angle_deg=self.front_half_angle_deg,
+            include_front_clearance=self.include_front_clearance,
+            front_normalization_distance=(
+                self.front_normalization_distance),
         )
 
         if measurements['distance_to_goal'] <= self.goal_tolerance:
