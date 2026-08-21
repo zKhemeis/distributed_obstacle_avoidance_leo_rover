@@ -17,6 +17,7 @@ from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import xacro
+import yaml
 
 
 def _boolean_argument(value: str, name: str) -> bool:
@@ -40,6 +41,20 @@ def _resolve_world(manifest: Path, split: str, configured: str) -> Path:
 
 
 def _launch_scenario(context):
+    config_argument = LaunchConfiguration('config').perform(context).strip()
+    environment_config = {}
+    if config_argument:
+        config_path = Path(config_argument).expanduser().resolve()
+        if not config_path.is_file():
+            raise FileNotFoundError(f'Configuration does not exist: {config_path}')
+        with config_path.open(encoding='utf-8') as stream:
+            loaded = yaml.safe_load(stream)
+        if not isinstance(loaded, dict):
+            raise ValueError(f'Configuration is not a mapping: {config_path}')
+        environment_config = loaded.get('environment', {})
+        if not isinstance(environment_config, dict):
+            raise ValueError('Configuration environment must be a mapping')
+
     manifest = Path(
         LaunchConfiguration('manifest').perform(context)
     ).expanduser().resolve()
@@ -58,6 +73,18 @@ def _launch_scenario(context):
         LaunchConfiguration('explicit_front_clearance').perform(context),
         'explicit_front_clearance',
     )
+    if config_argument:
+        explicit_front_clearance = bool(environment_config.get(
+            'include_front_clearance', explicit_front_clearance))
+    shield_override = LaunchConfiguration('safety_shield').perform(context)
+    if shield_override.strip().lower() == 'auto':
+        safety_shield = bool(environment_config.get(
+            'enable_safety_shield', False))
+    else:
+        safety_shield = _boolean_argument(shield_override, 'safety_shield')
+
+    def configured(name: str, default):
+        return environment_config.get(name, default)
 
     if not manifest.is_file():
         raise FileNotFoundError(f'Manifest does not exist: {manifest}')
@@ -89,19 +116,49 @@ def _launch_scenario(context):
         '-p', f'model_path:={model}',
         '-p', f'goal_x:={goal_x}',
         '-p', f'goal_y:={goal_y}',
-        '-p', 'n_sectors:=50',
+        '-p', f'n_sectors:={configured("n_sectors", 50)}',
         '-p', 'number_of_rays:=500',
         '-p', 'range_min:=0.05',
         '-p', 'range_max:=12.0',
-        '-p', 'maximum_goal_distance:=14.1421356237',
-        '-p', 'front_half_angle_deg:=30.0',
+        '-p', (
+            'maximum_goal_distance:='
+            f'{configured("maximum_goal_distance", 14.1421356237)}'),
+        '-p', f'front_half_angle_deg:={configured("front_half_angle_deg", 30.0)}',
         '-p',
         f'include_front_clearance:={str(explicit_front_clearance).lower()}',
-        '-p', 'front_normalization_distance:=0.80',
-        '-p', 'linear_speed_max:=0.25',
-        '-p', 'angular_speed_max:=0.80',
-        '-p', 'goal_tolerance:=0.25',
-        '-p', 'maximum_episode_steps:=400',
+        '-p', (
+            'front_normalization_distance:='
+            f'{configured("front_normalization_distance", 0.80)}'),
+        '-p', (
+            'use_footprint_clearance:='
+            f'{str(bool(configured("use_footprint_clearance", False))).lower()}'),
+        '-p', (
+            'footprint_half_length:='
+            f'{configured("footprint_half_length", 0.215)}'),
+        '-p', (
+            'footprint_half_width:='
+            f'{configured("footprint_half_width", 0.259)}'),
+        '-p', f'lidar_offset_x:={configured("lidar_offset_x", 0.10)}',
+        '-p', f'lidar_offset_y:={configured("lidar_offset_y", 0.0)}',
+        '-p', (
+            'footprint_half_angle_deg:='
+            f'{configured("footprint_half_angle_deg", 90.0)}'),
+        '-p', f'enable_safety_shield:={str(safety_shield).lower()}',
+        '-p', (
+            'safety_stop_distance:='
+            f'{configured("safety_stop_distance", 0.08)}'),
+        '-p', (
+            'safety_slowdown_distance:='
+            f'{configured("safety_slowdown_distance", 0.35)}'),
+        '-p', (
+            'safety_minimum_turn_speed:='
+            f'{configured("safety_minimum_turn_speed", 0.40)}'),
+        '-p', f'linear_speed_max:={configured("linear_speed_max", 0.25)}',
+        '-p', f'angular_speed_max:={configured("angular_speed_max", 0.80)}',
+        '-p', f'goal_tolerance:={configured("goal_tolerance", 0.25)}',
+        '-p', (
+            'maximum_episode_steps:='
+            f'{configured("maximum_episode_steps", 400)}'),
         '-p', 'control_hz:=10.0',
         '-p', 'sensor_timeout:=0.50',
     ]
@@ -117,7 +174,8 @@ def _launch_scenario(context):
             f'start=({start_x:.6f}, {start_y:.6f}, {start_yaw:.6f}); '
             f'goal=({goal_x:.6f}, {goal_y:.6f}); '
             f'detailed_model={detailed_model}; '
-            f'explicit_front_clearance={explicit_front_clearance}')),
+            f'explicit_front_clearance={explicit_front_clearance}; '
+            f'safety_shield={safety_shield}')),
         Node(
             package='leo_pybullet',
             executable='pybullet_sim_node',
@@ -192,6 +250,11 @@ def _launch_scenario(context):
 def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument(
+            'config',
+            default_value='',
+            description='Optional PPO YAML defining the ROS observation contract.',
+        ),
+        DeclareLaunchArgument(
             'manifest',
             default_value=(
                 '/root/leo_ws/src/leo_pybullet/worlds/'
@@ -223,6 +286,11 @@ def generate_launch_description() -> LaunchDescription:
             description=(
                 'Use the 54-value observation containing explicit normalized '
                 'front clearance. Keep false for legacy 53-value policies.'),
+        ),
+        DeclareLaunchArgument(
+            'safety_shield',
+            default_value='auto',
+            description='Use the configured safety shield, or override true/false.',
         ),
         DeclareLaunchArgument('rviz', default_value='true'),
         OpaqueFunction(function=_launch_scenario),

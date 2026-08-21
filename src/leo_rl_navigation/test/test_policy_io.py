@@ -5,7 +5,11 @@ import unittest
 
 import numpy as np
 
-from leo_rl_navigation.policy_io import action_to_command, build_observation
+from leo_rl_navigation.policy_io import (
+    action_to_command,
+    apply_footprint_safety,
+    build_observation,
+)
 
 
 class PolicyIoTests(unittest.TestCase):
@@ -139,6 +143,118 @@ class PolicyIoTests(unittest.TestCase):
         )
         self.assertAlmostEqual(linear, 0.125)
         self.assertAlmostEqual(angular, 0.0)
+
+    def test_footprint_clearance_detects_front_wheel_corner(self) -> None:
+        ranges = np.full(500, 12.0, dtype=np.float32)
+        angle_increment = 2.0 * math.pi / 500.0
+        corner_index = int(round(math.radians(66.0) / angle_increment))
+        ranges[corner_index] = 0.295
+
+        observation, measurements = build_observation(
+            ranges,
+            pose_x=0.0,
+            pose_y=0.0,
+            pose_yaw=0.0,
+            goal_x=1.0,
+            goal_y=0.0,
+            number_of_rays=500,
+            n_sectors=50,
+            range_min=0.05,
+            range_max=12.0,
+            maximum_goal_distance=math.sqrt(200.0),
+            front_half_angle_deg=30.0,
+            include_front_clearance=True,
+            front_normalization_distance=0.50,
+            use_footprint_clearance=True,
+            footprint_half_angle_deg=90.0,
+        )
+
+        self.assertEqual(observation.shape, (54,))
+        self.assertAlmostEqual(measurements['front_minimum_scan'], 12.0)
+        self.assertLess(measurements['footprint_minimum_clearance'], 0.03)
+        self.assertGreater(measurements['footprint_nearest_angle_deg'], 60.0)
+        self.assertLess(float(observation[50]), 0.06)
+
+    def test_footprint_clearance_respects_sensor_front_offset(self) -> None:
+        ranges = np.full(500, 12.0, dtype=np.float32)
+        ranges[0] = 0.247
+
+        _, measurements = build_observation(
+            ranges,
+            pose_x=0.0,
+            pose_y=0.0,
+            pose_yaw=0.0,
+            goal_x=1.0,
+            goal_y=0.0,
+            number_of_rays=500,
+            n_sectors=50,
+            range_min=0.05,
+            range_max=12.0,
+            maximum_goal_distance=math.sqrt(200.0),
+            use_footprint_clearance=True,
+        )
+
+        self.assertAlmostEqual(
+            measurements['footprint_minimum_clearance'],
+            0.247 - (0.215 - 0.10),
+            places=5,
+        )
+
+    def test_safety_shield_stops_and_turns_toward_clearer_side(self) -> None:
+        linear, angular, active = apply_footprint_safety(
+            0.25,
+            0.10,
+            {
+                'footprint_minimum_clearance': 0.02,
+                'footprint_left_clearance': 0.06,
+                'footprint_right_clearance': 0.80,
+            },
+            enabled=True,
+            stop_distance=0.08,
+            slowdown_distance=0.35,
+            minimum_turn_speed=0.40,
+            angular_speed_max=0.80,
+        )
+
+        self.assertTrue(active)
+        self.assertEqual(linear, 0.0)
+        self.assertAlmostEqual(angular, -0.40)
+
+    def test_safety_shield_scales_speed_before_body_contact(self) -> None:
+        linear, angular, active = apply_footprint_safety(
+            0.25,
+            0.20,
+            {
+                'footprint_minimum_clearance': 0.215,
+                'footprint_left_clearance': 1.0,
+                'footprint_right_clearance': 1.0,
+            },
+            enabled=True,
+            stop_distance=0.08,
+            slowdown_distance=0.35,
+            minimum_turn_speed=0.40,
+            angular_speed_max=0.80,
+        )
+
+        self.assertTrue(active)
+        self.assertAlmostEqual(linear, 0.125)
+        self.assertAlmostEqual(angular, 0.20)
+
+    def test_disabled_safety_shield_preserves_legacy_action(self) -> None:
+        linear, angular, active = apply_footprint_safety(
+            0.25,
+            -0.30,
+            {},
+            enabled=False,
+            stop_distance=0.08,
+            slowdown_distance=0.35,
+            minimum_turn_speed=0.40,
+            angular_speed_max=0.80,
+        )
+
+        self.assertFalse(active)
+        self.assertAlmostEqual(linear, 0.25)
+        self.assertAlmostEqual(angular, -0.30)
 
     def test_invalid_lidar_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

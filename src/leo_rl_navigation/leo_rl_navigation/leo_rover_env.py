@@ -20,7 +20,11 @@ from leo_bullet_sim import (
     NUMBER_OF_RAYS,
     PHYSICS_RATE,
 )
-from leo_rl_navigation.policy_io import action_to_command, build_observation
+from leo_rl_navigation.policy_io import (
+    action_to_command,
+    apply_footprint_safety,
+    build_observation,
+)
 
 
 class LeoRoverEnv(gym.Env):
@@ -51,6 +55,17 @@ class LeoRoverEnv(gym.Env):
         front_normalization_distance: float = 0.80,
         front_safety_distance: float = 0.0,
         front_unsafe_speed_penalty_weight: float = 0.0,
+        use_footprint_clearance: bool = False,
+        footprint_half_length: float = 0.215,
+        footprint_half_width: float = 0.259,
+        lidar_offset_x: float = 0.10,
+        lidar_offset_y: float = 0.0,
+        footprint_half_angle_deg: float = 90.0,
+        enable_safety_shield: bool = False,
+        safety_stop_distance: float = 0.08,
+        safety_slowdown_distance: float = 0.35,
+        safety_minimum_turn_speed: float = 0.40,
+        safety_intervention_penalty_weight: float = 0.0,
         stuck_window_steps: int = 0,
         stuck_displacement_threshold: float = 0.05,
         stuck_yaw_threshold: float = 0.10,
@@ -80,6 +95,13 @@ class LeoRoverEnv(gym.Env):
             'front_normalization_distance': front_normalization_distance,
             'front_unsafe_speed_penalty_weight': (
                 front_unsafe_speed_penalty_weight),
+            'footprint_half_length': footprint_half_length,
+            'footprint_half_width': footprint_half_width,
+            'safety_stop_distance': safety_stop_distance,
+            'safety_slowdown_distance': safety_slowdown_distance,
+            'safety_minimum_turn_speed': safety_minimum_turn_speed,
+            'safety_intervention_penalty_weight': (
+                safety_intervention_penalty_weight),
             'stuck_displacement_threshold': stuck_displacement_threshold,
             'stuck_yaw_threshold': stuck_yaw_threshold,
             'stuck_minimum_command_speed': stuck_minimum_command_speed,
@@ -117,6 +139,24 @@ class LeoRoverEnv(gym.Env):
         self.front_safety_distance = float(front_safety_distance)
         self.front_unsafe_speed_penalty_weight = float(
             front_unsafe_speed_penalty_weight)
+        self.use_footprint_clearance = bool(use_footprint_clearance)
+        self.footprint_half_length = float(footprint_half_length)
+        self.footprint_half_width = float(footprint_half_width)
+        self.lidar_offset_x = float(lidar_offset_x)
+        self.lidar_offset_y = float(lidar_offset_y)
+        self.footprint_half_angle_deg = float(footprint_half_angle_deg)
+        self.enable_safety_shield = bool(enable_safety_shield)
+        self.safety_stop_distance = float(safety_stop_distance)
+        self.safety_slowdown_distance = float(safety_slowdown_distance)
+        self.safety_minimum_turn_speed = float(safety_minimum_turn_speed)
+        self.safety_intervention_penalty_weight = float(
+            safety_intervention_penalty_weight)
+        if (
+            self.enable_safety_shield and
+            self.safety_slowdown_distance <= self.safety_stop_distance
+        ):
+            raise ValueError(
+                'Safety slowdown distance must exceed stop distance')
         self.stuck_window_steps = int(stuck_window_steps)
         self.stuck_displacement_threshold = float(
             stuck_displacement_threshold)
@@ -135,6 +175,7 @@ class LeoRoverEnv(gym.Env):
         self._world_file = ''
         self._manifest_index = -1
         self._next_world_index = 0
+        self._latest_measurements: dict[str, float] = {}
         self._pose_history: deque[tuple[float, float, float]] = deque(
             maxlen=max(self.stuck_window_steps + 1, 1))
 
@@ -244,6 +285,7 @@ class LeoRoverEnv(gym.Env):
         self._manifest_index = index
 
         observation, measurements = self._observation_and_measurements()
+        self._latest_measurements = dict(measurements)
         self._previous_distance = measurements['distance_to_goal']
         self._pose_history.clear()
         self._pose_history.append((
@@ -265,18 +307,34 @@ class LeoRoverEnv(gym.Env):
         self,
         action: np.ndarray,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        linear_velocity, angular_velocity = action_to_command(
+        requested_linear, requested_angular = action_to_command(
             action,
             linear_speed_max=self.linear_speed_max,
             angular_speed_max=self.angular_speed_max,
+        )
+        linear_velocity, angular_velocity, shield_active = (
+            apply_footprint_safety(
+                requested_linear,
+                requested_angular,
+                self._latest_measurements,
+                enabled=self.enable_safety_shield,
+                stop_distance=self.safety_stop_distance,
+                slowdown_distance=self.safety_slowdown_distance,
+                minimum_turn_speed=self.safety_minimum_turn_speed,
+                angular_speed_max=self.angular_speed_max,
+            )
         )
         self._simulation.set_command(linear_velocity, angular_velocity)
         self._simulation.step(CONTROL_PHYSICS_STEPS)
         self._episode_steps += 1
 
         observation, measurements = self._observation_and_measurements()
+        self._latest_measurements = dict(measurements)
         measurements['command_linear'] = float(linear_velocity)
         measurements['command_angular'] = float(angular_velocity)
+        measurements['requested_command_linear'] = float(requested_linear)
+        measurements['requested_command_angular'] = float(requested_angular)
+        measurements['safety_shield_active'] = bool(shield_active)
         distance = measurements['distance_to_goal']
         collision = bool(self._simulation.has_collision())
         success = bool(distance <= self.goal_tolerance and not collision)
@@ -306,7 +364,7 @@ class LeoRoverEnv(gym.Env):
                 (self.safety_distance - measurements['minimum_scan']) /
                 self.safety_distance,
             )
-        normalized_linear_speed = linear_velocity / self.linear_speed_max
+        normalized_linear_speed = requested_linear / self.linear_speed_max
         reward_proximity = (
             -self.proximity_penalty_weight * clearance_ratio ** 2)
         reward_unsafe_speed = (
@@ -314,19 +372,29 @@ class LeoRoverEnv(gym.Env):
             normalized_linear_speed * clearance_ratio)
         front_clearance_ratio = 0.0
         if self.front_safety_distance > 0.0:
+            front_clearance = (
+                measurements['footprint_minimum_clearance']
+                if self.use_footprint_clearance
+                else measurements['front_minimum_scan']
+            )
             front_clearance_ratio = max(
                 0.0,
-                (self.front_safety_distance -
-                 measurements['front_minimum_scan']) /
+                (self.front_safety_distance - front_clearance) /
                 self.front_safety_distance,
             )
         reward_front_unsafe_speed = (
             -self.front_unsafe_speed_penalty_weight *
             normalized_linear_speed * front_clearance_ratio)
+        reward_safety_intervention = (
+            -self.safety_intervention_penalty_weight *
+            max(requested_linear - linear_velocity, 0.0) /
+            self.linear_speed_max
+        )
         reward = (
             reward_progress + reward_time + reward_goal + reward_collision +
             reward_timeout + reward_stuck + reward_proximity +
-            reward_unsafe_speed + reward_front_unsafe_speed)
+            reward_unsafe_speed + reward_front_unsafe_speed +
+            reward_safety_intervention)
         self._previous_distance = distance
 
         if terminated or truncated:
@@ -343,6 +411,8 @@ class LeoRoverEnv(gym.Env):
             'reward_unsafe_speed': float(reward_unsafe_speed),
             'reward_front_unsafe_speed': float(
                 reward_front_unsafe_speed),
+            'reward_safety_intervention': float(
+                reward_safety_intervention),
         }
         info = self._build_info(
             measurements,
@@ -397,6 +467,12 @@ class LeoRoverEnv(gym.Env):
             include_front_clearance=self.include_front_clearance,
             front_normalization_distance=(
                 self.front_normalization_distance),
+            use_footprint_clearance=self.use_footprint_clearance,
+            footprint_half_length=self.footprint_half_length,
+            footprint_half_width=self.footprint_half_width,
+            lidar_offset_x=self.lidar_offset_x,
+            lidar_offset_y=self.lidar_offset_y,
+            footprint_half_angle_deg=self.footprint_half_angle_deg,
         )
 
     def _build_info(

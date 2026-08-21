@@ -121,6 +121,48 @@ class SafetyObjectiveTests(unittest.TestCase):
         self.assertEqual(info['reward_stuck'], -9.0)
         environment.close()
 
+    def test_footprint_reward_uses_body_clearance(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            use_footprint_clearance=True,
+            include_front_clearance=True,
+            front_half_angle_deg=90.0,
+            front_safety_distance=3.0,
+            front_unsafe_speed_penalty_weight=1.0,
+        )
+        environment.reset()
+        forward = np.array([1.0, 0.0], dtype=np.float32)
+        _, _, _, _, info = environment.step(forward)
+
+        self.assertLess(
+            info['footprint_minimum_clearance'],
+            info['front_minimum_scan'],
+        )
+        self.assertLess(info['reward_front_unsafe_speed'], 0.0)
+        environment.close()
+
+    def test_safety_intervention_penalizes_requested_unsafe_speed(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            use_footprint_clearance=True,
+            include_front_clearance=True,
+            enable_safety_shield=True,
+            safety_stop_distance=0.08,
+            safety_slowdown_distance=2.0,
+            safety_intervention_penalty_weight=0.30,
+        )
+        environment.reset()
+        forward = np.array([1.0, 0.0], dtype=np.float32)
+        _, _, _, _, info = environment.step(forward)
+
+        self.assertTrue(info['safety_shield_active'])
+        self.assertGreater(
+            info['requested_command_linear'],
+            info['command_linear'],
+        )
+        self.assertLess(info['reward_safety_intervention'], 0.0)
+        environment.close()
+
 
 if __name__ == '__main__':
     unittest.main()

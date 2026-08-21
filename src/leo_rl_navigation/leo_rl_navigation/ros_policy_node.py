@@ -17,7 +17,11 @@ from stable_baselines3 import PPO
 from std_msgs.msg import Bool
 from visualization_msgs.msg import Marker
 
-from leo_rl_navigation.policy_io import action_to_command, build_observation
+from leo_rl_navigation.policy_io import (
+    action_to_command,
+    apply_footprint_safety,
+    build_observation,
+)
 
 
 def _yaw_from_odometry(message: Odometry) -> float:
@@ -58,6 +62,26 @@ class RosPolicyNode(Node):
         self.front_normalization_distance = float(
             self.declare_parameter(
                 'front_normalization_distance', 0.80).value)
+        self.use_footprint_clearance = bool(
+            self.declare_parameter('use_footprint_clearance', False).value)
+        self.footprint_half_length = float(
+            self.declare_parameter('footprint_half_length', 0.215).value)
+        self.footprint_half_width = float(
+            self.declare_parameter('footprint_half_width', 0.259).value)
+        self.lidar_offset_x = float(
+            self.declare_parameter('lidar_offset_x', 0.10).value)
+        self.lidar_offset_y = float(
+            self.declare_parameter('lidar_offset_y', 0.0).value)
+        self.footprint_half_angle_deg = float(
+            self.declare_parameter('footprint_half_angle_deg', 90.0).value)
+        self.enable_safety_shield = bool(
+            self.declare_parameter('enable_safety_shield', False).value)
+        self.safety_stop_distance = float(
+            self.declare_parameter('safety_stop_distance', 0.08).value)
+        self.safety_slowdown_distance = float(
+            self.declare_parameter('safety_slowdown_distance', 0.35).value)
+        self.safety_minimum_turn_speed = float(
+            self.declare_parameter('safety_minimum_turn_speed', 0.40).value)
         self.linear_speed_max = float(
             self.declare_parameter('linear_speed_max', 0.25).value)
         self.angular_speed_max = float(
@@ -114,7 +138,9 @@ class RosPolicyNode(Node):
         self.get_logger().info(f'Loaded PPO model: {self.model_path}')
         self.get_logger().info(
             f'Goal: ({self.goal_x:.6f}, {self.goal_y:.6f}); '
-            f'control={self.control_hz:.1f} Hz')
+            f'control={self.control_hz:.1f} Hz; '
+            f'footprint_clearance={self.use_footprint_clearance}; '
+            f'safety_shield={self.enable_safety_shield}')
 
     def _scan_callback(self, message: LaserScan) -> None:
         self.latest_scan = message
@@ -198,6 +224,12 @@ class RosPolicyNode(Node):
             include_front_clearance=self.include_front_clearance,
             front_normalization_distance=(
                 self.front_normalization_distance),
+            use_footprint_clearance=self.use_footprint_clearance,
+            footprint_half_length=self.footprint_half_length,
+            footprint_half_width=self.footprint_half_width,
+            lidar_offset_x=self.lidar_offset_x,
+            lidar_offset_y=self.lidar_offset_y,
+            footprint_half_angle_deg=self.footprint_half_angle_deg,
         )
 
         if measurements['distance_to_goal'] <= self.goal_tolerance:
@@ -217,10 +249,22 @@ class RosPolicyNode(Node):
             return
 
         action, _ = self.model.predict(observation, deterministic=True)
-        linear_velocity, angular_velocity = action_to_command(
+        requested_linear, requested_angular = action_to_command(
             action,
             linear_speed_max=self.linear_speed_max,
             angular_speed_max=self.angular_speed_max,
+        )
+        linear_velocity, angular_velocity, shield_active = (
+            apply_footprint_safety(
+                requested_linear,
+                requested_angular,
+                measurements,
+                enabled=self.enable_safety_shield,
+                stop_distance=self.safety_stop_distance,
+                slowdown_distance=self.safety_slowdown_distance,
+                minimum_turn_speed=self.safety_minimum_turn_speed,
+                angular_speed_max=self.angular_speed_max,
+            )
         )
         command = Twist()
         command.linear.x = linear_velocity
@@ -233,6 +277,9 @@ class RosPolicyNode(Node):
             f'distance={measurements["distance_to_goal"]:.3f} '
             f'min_scan={measurements["minimum_scan"]:.3f} '
             f'front_scan={measurements["front_minimum_scan"]:.3f} '
+            f'body_clearance={measurements["footprint_minimum_clearance"]:.3f} '
+            f'raw_v={requested_linear:.3f} '
+            f'shield={str(shield_active).lower()} '
             f'v={linear_velocity:.3f} w={angular_velocity:.3f}',
             throttle_duration_sec=1.0,
         )

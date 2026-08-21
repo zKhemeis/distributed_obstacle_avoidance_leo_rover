@@ -107,6 +107,25 @@ class EnvironmentContractTests(unittest.TestCase):
         self.assertTrue(info['timeout'])
         timeout_environment.close()
 
+    def test_footprint_mode_keeps_existing_54_value_contract(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            split='train',
+            include_front_clearance=True,
+            use_footprint_clearance=True,
+            enable_safety_shield=True,
+        )
+        observation, info = environment.reset(seed=4)
+
+        self.assertEqual(observation.shape, (54,))
+        self.assertTrue(environment.observation_space.contains(observation))
+        self.assertIn('footprint_minimum_clearance', info)
+        self.assertAlmostEqual(
+            float(observation[50]),
+            info['normalized_front_clearance'],
+        )
+        environment.close()
+
     def test_collision_terminates_episode(self) -> None:
         environment = LeoRoverEnv(
             self.manifest,
