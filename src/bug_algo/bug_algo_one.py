@@ -52,9 +52,9 @@ N_BEAMS = 3200
 # Resampled-beam indices for alignment checks. beam_rel = linspace(-pi, pi, N,
 # endpoint=False), so 0 rad (robot forward) is at N/2, +pi/2 (left) at 3N/4,
 # -pi/2 (right) at N/4.
-FWD_BEAM = 0                                   # 1600 -> straight ahead
-LEFT_BEAM = 3 * N_BEAMS // 4                   # 2400 -> rover's left (CCW)
-RIGHT_BEAM = N_BEAMS // 4                       # 800  -> rover's right
+FWD_BEAM = 0                                   # 0 -> straight ahead
+LEFT_BEAM = N_BEAMS // 4                   # 800 -> rover's left (CCW)
+RIGHT_BEAM = 3 * N_BEAMS // 4                       # 2400  -> rover's right
 LIDAR_FOV = 2 * math.pi                       # 360 deg scan
 LIDAR_MAX_RANGE = 10.0                          # meters
 V_MAX = 0.4                                    # m/s
@@ -67,7 +67,7 @@ DIAG = math.hypot(6.0, 6.0)                    # sqrt(72) ~= 8.485
 
 CONTROL_HZ = 10.0                              # dt = 0.1 in sim
 SENSOR_TIMEOUT = 0.5                           # s; stop if data goes stale
-SAFETY_MARGIN = 0.10                           # m; hard-stop clearance
+SAFETY_MARGIN = 0.15                           # m; hard-stop clearance
 
 
 def yaw_from_quat(q):
@@ -159,11 +159,11 @@ class BugDeploy(Node):
         no_return = ~np.isfinite(ranges) | (ranges <= 0.0) | (ranges > msg.range_max)
         too_close = np.isfinite(ranges) & (ranges > 0.0) & (ranges < msg.range_min)
         ranges[no_return] = LIDAR_MAX_RANGE
-        ranges[too_close] = msg.range_min
+        ranges[too_close] = LIDAR_MAX_RANGE  # msg.range_min
 
         # Exclude 90° section behind the rover as that is taken up by the compute box
-        low_idx_behind = 3*len(ranges)/8
-        high_idx_behind = 5*len(ranges)/8
+        low_idx_behind = int(3*len(ranges)/8)
+        high_idx_behind = int(5*len(ranges)/8)
         ranges[low_idx_behind:high_idx_behind] = LIDAR_MAX_RANGE
 
         ranges = np.clip(ranges, 0.0, LIDAR_MAX_RANGE)
@@ -173,10 +173,17 @@ class BugDeploy(Node):
 
     def _on_odom(self, msg: Odometry):
         self.get_logger().info(f"{msg}")
-        p = msg.pose.pose.position
-        yaw = yaw_from_quat(msg.pose.pose.orientation)
-        self._pose = (p.x, p.y, yaw)
-        self._pose_stamp = self.get_clock().now()
+
+        if isinstance(msg, Odometry):
+            p = msg.pose.pose.position
+            yaw = yaw_from_quat(msg.pose.pose.orientation)
+            self._pose = (p.x, p.y, yaw)
+            self._pose_stamp = self.get_clock().now()
+        elif isinstance(msg, WheelOdom):
+            self._pose = (msg.pose_x, msg.pose_y, msg.pose_yaw)
+            self._pose_stamp = self.get_clock().now()
+        else:
+            self.get_logger().warn(f"Incorrect msg type in _on_odom: {type(msg)}")
 
     # ---------------------------------------------------------------- obs
     def _build_obs(self):
@@ -235,7 +242,8 @@ class BugDeploy(Node):
 
         # Hard safety stop: real obstacle inside the footprint + margin.
         if float(self._scan.min()) < ROBOT_RADIUS + SAFETY_MARGIN:
-            self._stop("obstacle within safety margin")
+            min_idx = np.argmin(self._scan)
+            self._stop(f"obstacle within safety margin: {min_idx} of {len(self._scan)} ranges")
             return
 
         obs, dist = self._build_obs()
