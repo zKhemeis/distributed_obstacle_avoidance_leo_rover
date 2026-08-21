@@ -96,8 +96,8 @@ class BugDeploy(Node):
         # this rover, e.g.
         #   -p odom_topic:=/merged_odom -p cmd_vel_topic:=/rob_1/cmd_vel
         self.declare_parameter("scan_topic", "/scan")
-        self.declare_parameter("odom_topic", "/rob_1/firmware/wheel_odom")
-        self.declare_parameter("cmd_vel_topic", "/rob_1/cmd_vel")
+        self.declare_parameter("odom_topic", "/firmware/wheel_odom")
+        self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         # When true, log the resampled forward/left/right beams each step so you
 	        # can verify lidar_yaw_offset and spin handedness before driving.
         self.declare_parameter("debug", False)
