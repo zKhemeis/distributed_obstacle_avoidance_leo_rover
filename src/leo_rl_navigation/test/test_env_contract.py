@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from leo_rl_navigation import LeoRoverEnv
+from leo_rl_navigation.policy_io import DISCRETE_MANEUVER_TABLE
 
 
 class EnvironmentContractTests(unittest.TestCase):
@@ -132,6 +133,35 @@ class EnvironmentContractTests(unittest.TestCase):
         _, _, _, _, info = environment.step(reverse)
         self.assertLess(info['command_linear'], 0.0)
         self.assertFalse(info['safety_shield_active'])
+        environment.close()
+
+    def test_discrete_maneuver_contract(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            split='train',
+            action_mode='discrete_primitives',
+            linear_reverse_speed_max=0.10,
+        )
+        environment.reset(seed=4)
+        self.assertEqual(environment.action_space.n, 13)
+
+        reverse = next(
+            index for index, (name, _, _) in
+            enumerate(DISCRETE_MANEUVER_TABLE)
+            if name == 'reverse_straight'
+        )
+        _, _, _, _, info = environment.step(reverse)
+        self.assertLess(info['command_linear'], 0.0)
+        self.assertFalse(info['safety_shield_active'])
+
+        pivot = next(
+            index for index, (name, _, _) in
+            enumerate(DISCRETE_MANEUVER_TABLE)
+            if name == 'pivot_left'
+        )
+        _, _, _, _, info = environment.step(pivot)
+        self.assertAlmostEqual(info['command_linear'], 0.0)
+        self.assertGreater(info['command_angular'], 0.0)
         environment.close()
 
     def test_footprint_mode_keeps_existing_54_value_contract(self) -> None:

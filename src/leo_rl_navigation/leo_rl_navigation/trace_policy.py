@@ -8,6 +8,7 @@ import numpy as np
 from stable_baselines3 import PPO
 
 from leo_rl_navigation import LeoRoverEnv
+from leo_rl_navigation.policy_io import DISCRETE_MANEUVER_TABLE
 from leo_rl_navigation.training_utils import environment_kwargs, load_config
 
 
@@ -42,23 +43,35 @@ def main() -> None:
     )
     print(f'world={info["world_file"]}')
     print(f'safety_shield={environment.enable_safety_shield}')
+    print(f'action_mode={environment.action_mode}')
     print(
-        f'{"STEP":>6} {"GOAL":>7} {"FRONT":>7} '
+        f'{"STEP":>6} {"MANEUVER":>16} {"GOAL":>7} {"FRONT":>7} '
         f'{"LEFT":>7} {"RIGHT":>7} {"V":>7} {"W":>7} '
         f'{"TURN R":>8} {"CLEAR R":>8}'
     )
 
     while True:
         action, _ = model.predict(observation, deterministic=True)
+        selected_action = (
+            int(np.asarray(action).reshape(-1)[0])
+            if environment.action_mode == 'discrete_primitives'
+            else np.asarray(action, dtype=np.float32)
+        )
         observation, _, terminated, truncated, info = environment.step(
-            np.asarray(action, dtype=np.float32))
+            selected_action)
         if (
             info['episode_step'] == 1 or
             info['episode_step'] % args.every == 0 or
             terminated or truncated
         ):
+            maneuver_name = (
+                DISCRETE_MANEUVER_TABLE[selected_action][0]
+                if environment.action_mode == 'discrete_primitives'
+                else 'continuous'
+            )
             print(
                 f'{info["episode_step"]:>6} '
+                f'{maneuver_name:>16} '
                 f'{info["distance_to_goal"]:>7.3f} '
                 f'{info["footprint_minimum_clearance"]:>7.3f} '
                 f'{info["footprint_left_escape_clearance"]:>7.3f} '

@@ -9,6 +9,7 @@ import torch
 from leo_rl_navigation.train_ppo import (
     _expand_policy_observation,
     _reset_linear_action_head,
+    _transfer_continuous_navigation_backbone,
 )
 
 
@@ -40,6 +41,20 @@ class _ExpandableModel:
         self.observation_space = _Space(width)
         self.action_space = action_space
         self.policy = _ExpandablePolicy(width)
+
+
+class _ManeuverPolicy(torch.nn.Module):
+    def __init__(self, action_count: int) -> None:
+        super().__init__()
+        self.policy_input = torch.nn.Linear(3, 4)
+        self.value_input = torch.nn.Linear(3, 4)
+        self.action_net = torch.nn.Linear(4, action_count)
+
+
+class _ManeuverModel:
+    def __init__(self, action_count: int) -> None:
+        self.observation_space = (3,)
+        self.policy = _ManeuverPolicy(action_count)
 
 
 class TrainingInitializationTests(unittest.TestCase):
@@ -166,6 +181,29 @@ class TrainingInitializationTests(unittest.TestCase):
                 target,
                 inserted_index=2,
             )
+
+    def test_discrete_transfer_preserves_actor_and_value_features(self) -> None:
+        source = _ManeuverModel(2)
+        target = _ManeuverModel(13)
+        with torch.no_grad():
+            source.policy.policy_input.weight.fill_(1.25)
+            source.policy.value_input.weight.fill_(2.50)
+            source.policy.action_net.weight[1].fill_(0.50)
+
+        transferred = _transfer_continuous_navigation_backbone(
+            source,
+            target,
+        )
+        self.assertGreater(transferred, 0)
+        self.assertTrue(torch.equal(
+            source.policy.policy_input.weight,
+            target.policy.policy_input.weight,
+        ))
+        self.assertTrue(torch.equal(
+            source.policy.value_input.weight,
+            target.policy.value_input.weight,
+        ))
+        self.assertEqual(target.policy.action_net.out_features, 13)
 
 
 if __name__ == '__main__':

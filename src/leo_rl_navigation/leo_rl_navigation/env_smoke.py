@@ -39,6 +39,9 @@ def main() -> None:
     print(f'worlds={environment.world_count}')
     print(f'observation_shape={environment.observation_space.shape}')
     print(f'action_shape={environment.action_space.shape}')
+    print(f'action_mode={environment.action_mode}')
+    if hasattr(environment.action_space, 'n'):
+        print(f'action_count={environment.action_space.n}')
 
     check_env(environment, warn=True, skip_render_check=True)
     print('check_env=PASS')

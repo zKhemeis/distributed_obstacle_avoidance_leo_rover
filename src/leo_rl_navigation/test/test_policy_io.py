@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 
 from leo_rl_navigation.policy_io import (
+    DISCRETE_MANEUVER_TABLE,
     action_to_command,
     apply_footprint_safety,
     build_observation,
@@ -161,6 +162,39 @@ class PolicyIoTests(unittest.TestCase):
             linear_reverse_speed_max=0.10,
         )
         self.assertAlmostEqual(forward, 0.25)
+
+    def test_discrete_maneuvers_expose_reverse_pivot_and_forward(self) -> None:
+        commands = {
+            name: action_to_command(
+                index,
+                linear_speed_max=0.25,
+                angular_speed_max=0.8,
+                linear_reverse_speed_max=0.10,
+                action_mode='discrete_primitives',
+            )
+            for index, (name, _, _) in enumerate(DISCRETE_MANEUVER_TABLE)
+        }
+        self.assertEqual(len(commands), 13)
+        self.assertAlmostEqual(commands['reverse_left'][0], -0.10)
+        self.assertGreater(commands['reverse_left'][1], 0.0)
+        self.assertAlmostEqual(commands['pivot_left'][0], 0.0)
+        self.assertAlmostEqual(commands['pivot_left'][1], 0.80)
+        self.assertAlmostEqual(commands['pivot_right'][0], 0.0)
+        self.assertAlmostEqual(commands['pivot_right'][1], -0.80)
+        self.assertLess(commands['crawl_left'][0], 0.10)
+        self.assertAlmostEqual(commands['forward_straight'][0], 0.25)
+
+    def test_discrete_maneuver_rejects_invalid_actions(self) -> None:
+        for invalid in (-1, len(DISCRETE_MANEUVER_TABLE), 1.5):
+            with self.subTest(action=invalid):
+                with self.assertRaises(ValueError):
+                    action_to_command(
+                        invalid,
+                        linear_speed_max=0.25,
+                        angular_speed_max=0.80,
+                        linear_reverse_speed_max=0.10,
+                        action_mode='discrete_primitives',
+                    )
 
     def test_directional_escape_features_use_side_sector_medians(self) -> None:
         ranges = np.full(500, 12.0, dtype=np.float32)

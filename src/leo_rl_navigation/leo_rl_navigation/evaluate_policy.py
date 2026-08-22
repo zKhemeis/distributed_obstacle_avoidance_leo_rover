@@ -34,6 +34,8 @@ RESULT_FIELDS = (
     'mean_linear_speed_mps',
     'mean_requested_linear_speed_mps',
     'reverse_steps',
+    'pivot_steps',
+    'slow_forward_steps',
     'mean_reverse_speed_mps',
     'front_blocked_steps',
     'mean_front_blocked_linear_speed_mps',
@@ -115,6 +117,8 @@ def main() -> None:
         linear_speeds: list[float] = []
         requested_linear_speeds: list[float] = []
         reverse_speeds: list[float] = []
+        pivot_steps = 0
+        slow_forward_steps = 0
         front_blocked_linear_speeds: list[float] = []
         angular_speeds: list[float] = []
         safety_interventions = 0
@@ -124,7 +128,10 @@ def main() -> None:
                 action = environment.action_space.sample()
             else:
                 action, _ = model.predict(observation, deterministic=True)
-            action = np.asarray(action, dtype=np.float32)
+            if environment.action_mode == 'discrete_primitives':
+                action = int(np.asarray(action).reshape(-1)[0])
+            else:
+                action = np.asarray(action, dtype=np.float32)
 
             observation, reward, terminated, truncated, info = (
                 environment.step(action)
@@ -149,6 +156,11 @@ def main() -> None:
             linear_speeds.append(linear_speed)
             if linear_speed < -1e-6:
                 reverse_speeds.append(abs(linear_speed))
+            angular_speed = abs(float(info['command_angular']))
+            if abs(linear_speed) <= 1e-6 and angular_speed > 1e-6:
+                pivot_steps += 1
+            if 1e-6 < linear_speed <= 0.5 * environment.linear_speed_max:
+                slow_forward_steps += 1
             requested_linear_speeds.append(float(
                 info['requested_command_linear']))
             safety_interventions += int(info['safety_shield_active'])
@@ -162,9 +174,7 @@ def main() -> None:
                 blocked_clearance < environment.front_safety_distance
             ):
                 front_blocked_linear_speeds.append(linear_speed)
-            angular_speeds.append(
-                abs(float(info['command_angular']))
-            )
+            angular_speeds.append(angular_speed)
 
             if terminated or truncated:
                 break
@@ -192,6 +202,8 @@ def main() -> None:
             'mean_requested_linear_speed_mps': round(
                 float(np.mean(requested_linear_speeds)), 6),
             'reverse_steps': len(reverse_speeds),
+            'pivot_steps': pivot_steps,
+            'slow_forward_steps': slow_forward_steps,
             'mean_reverse_speed_mps': round(
                 float(np.mean(reverse_speeds)) if reverse_speeds else 0.0,
                 6,
@@ -215,10 +227,13 @@ def main() -> None:
     timeouts = sum(row['timeout'] for row in rows)
     stuck = sum(row['stuck'] for row in rows)
     reverse_steps = sum(row['reverse_steps'] for row in rows)
+    pivot_steps = sum(row['pivot_steps'] for row in rows)
+    slow_forward_steps = sum(row['slow_forward_steps'] for row in rows)
     safety_interventions = sum(
         row['safety_intervention_steps'] for row in rows)
     print(f'policy={policy_name}')
     print(f'safety_shield={environment.enable_safety_shield}')
+    print(f'action_mode={environment.action_mode}')
     print(f'split={args.split}')
     print(f'episodes={len(rows)}')
     print(f'successes={successes}')
@@ -226,6 +241,8 @@ def main() -> None:
     print(f'timeouts={timeouts}')
     print(f'stuck={stuck}')
     print(f'reverse_steps={reverse_steps}')
+    print(f'pivot_steps={pivot_steps}')
+    print(f'slow_forward_steps={slow_forward_steps}')
     print(f'safety_intervention_steps={safety_interventions}')
     print(f'success_rate={successes / max(len(rows), 1):.6f}')
     print(f'collision_rate={collisions / max(len(rows), 1):.6f}')

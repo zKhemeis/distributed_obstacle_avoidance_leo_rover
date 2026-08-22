@@ -21,6 +21,7 @@ from leo_bullet_sim import (
     PHYSICS_RATE,
 )
 from leo_rl_navigation.policy_io import (
+    DISCRETE_MANEUVER_TABLE,
     action_to_command,
     apply_footprint_safety,
     build_observation,
@@ -28,7 +29,7 @@ from leo_rl_navigation.policy_io import (
 
 
 class LeoRoverEnv(gym.Env):
-    """Goal navigation with LiDAR and a continuous velocity action."""
+    """Goal navigation with continuous or PPO-selected maneuver actions."""
 
     metadata = {'render_modes': []}
 
@@ -40,6 +41,7 @@ class LeoRoverEnv(gym.Env):
         linear_speed_max: float = 0.25,
         angular_speed_max: float = 0.80,
         linear_reverse_speed_max: float = 0.0,
+        action_mode: str = 'continuous',
         maximum_goal_distance: float = math.sqrt(200.0),
         goal_tolerance: float = 0.25,
         maximum_episode_steps: int = 400,
@@ -91,6 +93,8 @@ class LeoRoverEnv(gym.Env):
                 f'n_sectors={n_sectors}')
         if linear_speed_max <= 0.0 or angular_speed_max <= 0.0:
             raise ValueError('Speed limits must be positive')
+        if action_mode not in {'continuous', 'discrete_primitives'}:
+            raise ValueError(f'Unknown PPO action mode: {action_mode}')
         if maximum_goal_distance <= 0.0:
             raise ValueError('maximum_goal_distance must be positive')
         if maximum_episode_steps <= 0:
@@ -138,6 +142,7 @@ class LeoRoverEnv(gym.Env):
         self.linear_speed_max = float(linear_speed_max)
         self.angular_speed_max = float(angular_speed_max)
         self.linear_reverse_speed_max = float(linear_reverse_speed_max)
+        self.action_mode = str(action_mode)
         self.maximum_goal_distance = float(maximum_goal_distance)
         self.goal_tolerance = float(goal_tolerance)
         self.maximum_episode_steps = int(maximum_episode_steps)
@@ -229,11 +234,14 @@ class LeoRoverEnv(gym.Env):
             high=observation_high,
             dtype=np.float32,
         )
-        self.action_space = spaces.Box(
-            low=np.array([-1.0, -1.0], dtype=np.float32),
-            high=np.array([1.0, 1.0], dtype=np.float32),
-            dtype=np.float32,
-        )
+        if self.action_mode == 'discrete_primitives':
+            self.action_space = spaces.Discrete(len(DISCRETE_MANEUVER_TABLE))
+        else:
+            self.action_space = spaces.Box(
+                low=np.array([-1.0, -1.0], dtype=np.float32),
+                high=np.array([1.0, 1.0], dtype=np.float32),
+                dtype=np.float32,
+            )
 
     def _read_manifest(self) -> list[dict[str, str]]:
         if not self.manifest_path.is_file():
@@ -339,7 +347,7 @@ class LeoRoverEnv(gym.Env):
 
     def step(
         self,
-        action: np.ndarray,
+        action: np.ndarray | int,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         previous_measurements = dict(self._latest_measurements)
         requested_linear, requested_angular = action_to_command(
@@ -347,6 +355,7 @@ class LeoRoverEnv(gym.Env):
             linear_speed_max=self.linear_speed_max,
             angular_speed_max=self.angular_speed_max,
             linear_reverse_speed_max=self.linear_reverse_speed_max,
+            action_mode=self.action_mode,
         )
         linear_velocity, angular_velocity, shield_active = (
             apply_footprint_safety(

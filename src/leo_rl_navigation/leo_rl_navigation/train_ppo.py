@@ -15,6 +15,7 @@ from stable_baselines3.common.callbacks import (
 )
 from stable_baselines3.common.vec_env import DummyVecEnv
 
+from leo_rl_navigation.policy_io import DISCRETE_MANEUVER_TABLE
 from leo_rl_navigation.training_utils import load_config, make_environment
 
 
@@ -115,6 +116,60 @@ def _expand_policy_observation(
     return expanded_parameters
 
 
+def _transfer_continuous_navigation_backbone(
+    source_model: PPO,
+    target_model: PPO,
+) -> int:
+    """Reuse PPO navigation and value features with a categorical action head.
+
+    The source Gaussian head cannot be copied into a categorical policy. Its
+    learned angular row seeds the new maneuver logits while all matching
+    actor/critic feature and value parameters are copied exactly.
+    """
+    if source_model.observation_space != target_model.observation_space:
+        raise ValueError('Initial model observation space is incompatible')
+    if source_model.policy.action_net.out_features != 2:
+        raise ValueError('Source model must have two continuous action outputs')
+    target_head = target_model.policy.action_net
+    if target_head.out_features != len(DISCRETE_MANEUVER_TABLE):
+        raise ValueError('Target model must use the discrete maneuver head')
+
+    source_state = source_model.policy.state_dict()
+    target_state = target_model.policy.state_dict()
+    copied_parameters = 0
+    for name, target_tensor in target_state.items():
+        if name.startswith('action_net.'):
+            continue
+        source_tensor = source_state.get(name)
+        if source_tensor is None or source_tensor.shape != target_tensor.shape:
+            raise ValueError(
+                f'Cannot transfer navigation parameter {name}: '
+                f'{None if source_tensor is None else tuple(source_tensor.shape)} '
+                f'-> {tuple(target_tensor.shape)}')
+        target_state[name] = source_tensor.detach().clone()
+        copied_parameters += 1
+
+    if copied_parameters == 0:
+        raise ValueError('No navigation or value parameters were transferred')
+    target_model.policy.load_state_dict(target_state, strict=True)
+
+    source_head = source_model.policy.action_net
+    with torch.no_grad():
+        for index, (_, linear_fraction, angular_fraction) in enumerate(
+                DISCRETE_MANEUVER_TABLE):
+            target_head.weight[index].copy_(
+                0.8 * angular_fraction * source_head.weight[1])
+            speed_prior = (
+                0.50 * max(linear_fraction, 0.0) -
+                0.20 * max(-linear_fraction, 0.0) -
+                0.10 * abs(angular_fraction)
+            )
+            target_head.bias[index].copy_(
+                0.8 * angular_fraction * source_head.bias[1] + speed_prior)
+
+    return copied_parameters
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
@@ -139,6 +194,14 @@ def main() -> None:
         help=(
             'After loading --initial-model, reset only the forward-speed '
             'action-mean row so it can be relearned without clipping.'
+        ),
+    )
+    parser.add_argument(
+        '--transfer-discrete-action-backbone',
+        action='store_true',
+        help=(
+            'Initialize a categorical maneuver PPO policy from a continuous '
+            'PPO actor/critic backbone and its learned angular action row.'
         ),
     )
     parser.add_argument(
@@ -176,6 +239,18 @@ def main() -> None:
     if args.expand_observation_at_index is not None and not args.initial_model:
         raise ValueError(
             '--expand-observation-at-index requires --initial-model')
+    if args.transfer_discrete_action_backbone and not args.initial_model:
+        raise ValueError(
+            '--transfer-discrete-action-backbone requires --initial-model')
+    if args.transfer_discrete_action_backbone and args.reset_linear_action_head:
+        raise ValueError(
+            'Discrete backbone transfer cannot reset a continuous action head')
+    if (
+        args.transfer_discrete_action_backbone and
+        args.expand_observation_at_index is not None
+    ):
+        raise ValueError(
+            'Discrete backbone transfer requires matching observation widths')
     if args.save_initialized_model_only and not args.initial_model:
         raise ValueError(
             '--save-initialized-model-only requires --initial-model')
@@ -283,13 +358,26 @@ def main() -> None:
     initial_model_path = None
     initial_model_timesteps = None
     expanded_policy_parameters = None
+    transferred_navigation_parameters = None
     if args.initial_model:
         initial_model_path = Path(args.initial_model).expanduser().resolve()
         if not initial_model_path.is_file():
             raise FileNotFoundError(
                 f'Initial model does not exist: {initial_model_path}')
         initial_model = PPO.load(initial_model_path, device=args.device)
-        if args.expand_observation_at_index is None:
+        if args.transfer_discrete_action_backbone:
+            transferred_navigation_parameters = (
+                _transfer_continuous_navigation_backbone(
+                    initial_model,
+                    model,
+                )
+            )
+            print(
+                'transferred_discrete_action_backbone=true '
+                f'copied_parameters={transferred_navigation_parameters} '
+                f'action_count={len(DISCRETE_MANEUVER_TABLE)}'
+            )
+        elif args.expand_observation_at_index is None:
             if initial_model.observation_space != model.observation_space:
                 raise ValueError(
                     'Initial model observation space is incompatible')
@@ -355,6 +443,10 @@ def main() -> None:
                 args.expand_observation_at_index
             ),
             'expanded_policy_parameters': expanded_policy_parameters,
+            'transfer_discrete_action_backbone': bool(
+                args.transfer_discrete_action_backbone),
+            'transferred_navigation_parameters': (
+                transferred_navigation_parameters),
             'save_initialized_model_only': bool(
                 args.save_initialized_model_only),
         },

@@ -8,6 +8,26 @@ from typing import Any
 import numpy as np
 
 
+# Each maneuver is a fixed actuator command, not a controller: PPO alone
+# selects its index from the current observation. Fractions are multiplied by
+# the configured forward, reverse, and angular actuator limits.
+DISCRETE_MANEUVER_TABLE: tuple[tuple[str, float, float], ...] = (
+    ('reverse_left', -1.0, 1.0),
+    ('reverse_straight', -1.0, 0.0),
+    ('reverse_right', -1.0, -1.0),
+    ('pivot_left', 0.0, 1.0),
+    ('pivot_right', 0.0, -1.0),
+    ('crawl_left', 0.30, 1.0),
+    ('crawl_right', 0.30, -1.0),
+    ('slow_straight', 0.40, 0.0),
+    ('forward_left', 0.60, 0.65),
+    ('forward_right', 0.60, -0.65),
+    ('gentle_left', 0.80, 0.35),
+    ('gentle_right', 0.80, -0.35),
+    ('forward_straight', 1.0, 0.0),
+)
+
+
 def wrap_angle(angle: float) -> float:
     """Wrap an angle to the interval [-pi, pi]."""
     return math.atan2(math.sin(angle), math.cos(angle))
@@ -269,12 +289,37 @@ def action_to_command(
     linear_speed_max: float,
     angular_speed_max: float,
     linear_reverse_speed_max: float = 0.0,
+    action_mode: str = 'continuous',
 ) -> tuple[float, float]:
-    """Map the normalized policy action to a velocity command."""
+    """Map a PPO-selected continuous action or maneuver to a command."""
     if linear_speed_max <= 0.0 or angular_speed_max <= 0.0:
         raise ValueError('Speed limits must be positive')
     if linear_reverse_speed_max < 0.0:
         raise ValueError('Reverse speed limit must be non-negative')
+
+    if action_mode == 'discrete_primitives':
+        action_array = np.asarray(action)
+        if action_array.shape not in ((), (1,)):
+            raise ValueError(
+                'Discrete maneuver action must be a scalar, got '
+                f'{action_array.shape}')
+        scalar = float(action_array.reshape(-1)[0])
+        if not math.isfinite(scalar) or not scalar.is_integer():
+            raise ValueError('Discrete maneuver action must be an integer')
+        index = int(scalar)
+        if not 0 <= index < len(DISCRETE_MANEUVER_TABLE):
+            raise ValueError(f'Discrete maneuver index is invalid: {index}')
+        _, linear_fraction, angular_fraction = DISCRETE_MANEUVER_TABLE[index]
+        linear_limit = (
+            linear_reverse_speed_max if linear_fraction < 0.0
+            else linear_speed_max)
+        return (
+            float(linear_fraction * linear_limit),
+            float(angular_fraction * angular_speed_max),
+        )
+
+    if action_mode != 'continuous':
+        raise ValueError(f'Unknown PPO action mode: {action_mode}')
 
     action_array = np.asarray(action, dtype=np.float32)
     if action_array.shape != (2,):

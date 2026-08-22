@@ -18,6 +18,7 @@ from std_msgs.msg import Bool
 from visualization_msgs.msg import Marker
 
 from leo_rl_navigation.policy_io import (
+    DISCRETE_MANEUVER_TABLE,
     action_to_command,
     apply_footprint_safety,
     build_observation,
@@ -100,6 +101,8 @@ class RosPolicyNode(Node):
             self.declare_parameter('linear_reverse_speed_max', 0.0).value)
         self.angular_speed_max = float(
             self.declare_parameter('angular_speed_max', 0.80).value)
+        self.action_mode = str(
+            self.declare_parameter('action_mode', 'continuous').value)
         self.goal_tolerance = float(
             self.declare_parameter('goal_tolerance', 0.25).value)
         self.maximum_episode_steps = int(
@@ -123,9 +126,20 @@ class RosPolicyNode(Node):
                 'Model observation shape does not match the ROS configuration: '
                 f'{self.model.observation_space.shape} versus '
                 f'{(expected_observation_size,)}')
-        if self.model.action_space.shape != (2,):
-            raise ValueError(
-                f'Expected a two-value action, got {self.model.action_space.shape}')
+        if self.action_mode == 'discrete_primitives':
+            if getattr(self.model.action_space, 'n', None) != len(
+                    DISCRETE_MANEUVER_TABLE):
+                raise ValueError(
+                    'Expected a discrete maneuver policy with '
+                    f'{len(DISCRETE_MANEUVER_TABLE)} actions, got '
+                    f'{self.model.action_space}')
+        elif self.action_mode == 'continuous':
+            if self.model.action_space.shape != (2,):
+                raise ValueError(
+                    'Expected a two-value continuous action, got '
+                    f'{self.model.action_space.shape}')
+        else:
+            raise ValueError(f'Unknown PPO action mode: {self.action_mode}')
 
         self.command_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         marker_qos = QoSProfile(depth=1)
@@ -156,6 +170,7 @@ class RosPolicyNode(Node):
             f'control={self.control_hz:.1f} Hz; '
             f'footprint_clearance={self.use_footprint_clearance}; '
             f'directional_clearance={self.include_directional_clearance}; '
+            f'action_mode={self.action_mode}; '
             f'reverse_max={self.linear_reverse_speed_max:.3f}; '
             f'safety_shield={self.enable_safety_shield}')
 
@@ -272,11 +287,17 @@ class RosPolicyNode(Node):
             return
 
         action, _ = self.model.predict(observation, deterministic=True)
+        maneuver_name = (
+            DISCRETE_MANEUVER_TABLE[int(np.asarray(action).reshape(-1)[0])][0]
+            if self.action_mode == 'discrete_primitives'
+            else 'continuous'
+        )
         requested_linear, requested_angular = action_to_command(
             action,
             linear_speed_max=self.linear_speed_max,
             angular_speed_max=self.angular_speed_max,
             linear_reverse_speed_max=self.linear_reverse_speed_max,
+            action_mode=self.action_mode,
         )
         linear_velocity, angular_velocity, shield_active = (
             apply_footprint_safety(
@@ -304,6 +325,7 @@ class RosPolicyNode(Node):
             f'body_clearance={measurements["footprint_minimum_clearance"]:.3f} '
             f'escape_left={measurements["footprint_left_escape_clearance"]:.3f} '
             f'escape_right={measurements["footprint_right_escape_clearance"]:.3f} '
+            f'maneuver={maneuver_name} '
             f'raw_v={requested_linear:.3f} '
             f'shield={str(shield_active).lower()} '
             f'v={linear_velocity:.3f} w={angular_velocity:.3f}',

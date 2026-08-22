@@ -166,6 +166,7 @@ def _launch_scenario(context):
             'safety_minimum_turn_speed:='
             f'{configured("safety_minimum_turn_speed", 0.40)}'),
         '-p', f'linear_speed_max:={configured("linear_speed_max", 0.25)}',
+        '-p', f'action_mode:={configured("action_mode", "continuous")}',
         '-p', (
             'linear_reverse_speed_max:='
             f'{configured("linear_reverse_speed_max", 0.0)}'),
