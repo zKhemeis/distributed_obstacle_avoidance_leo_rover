@@ -163,6 +163,44 @@ class SafetyObjectiveTests(unittest.TestCase):
         self.assertLess(info['reward_safety_intervention'], 0.0)
         environment.close()
 
+    def test_directional_escape_rewards_turning_toward_open_side(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            include_front_clearance=True,
+            include_directional_clearance=True,
+            use_footprint_clearance=True,
+            front_safety_distance=3.0,
+            escape_turn_reward_weight=1.0,
+        )
+        environment.reset()
+        environment._latest_measurements['footprint_left_escape_clearance'] = 3.0
+        environment._latest_measurements['footprint_right_escape_clearance'] = 0.2
+        _, _, _, _, info = environment.step(
+            np.array([0.0, 1.0], dtype=np.float32))
+
+        self.assertGreater(info['reward_escape_turn'], 0.0)
+        self.assertFalse(info['safety_shield_active'])
+        environment.close()
+
+    def test_reverse_escape_is_learned_without_shield_intervention(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            linear_reverse_speed_max=0.10,
+            use_footprint_clearance=True,
+            front_safety_distance=3.0,
+            front_unsafe_speed_penalty_weight=1.0,
+            escape_reverse_reward_weight=0.5,
+        )
+        environment.reset()
+        _, _, _, _, info = environment.step(
+            np.array([-1.0, 0.0], dtype=np.float32))
+
+        self.assertLess(info['command_linear'], 0.0)
+        self.assertEqual(info['reward_front_unsafe_speed'], 0.0)
+        self.assertGreater(info['reward_escape_reverse'], 0.0)
+        self.assertFalse(info['safety_shield_active'])
+        environment.close()
+
 
 if __name__ == '__main__':
     unittest.main()

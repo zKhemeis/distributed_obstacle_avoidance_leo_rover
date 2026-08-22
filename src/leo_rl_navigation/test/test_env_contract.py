@@ -107,6 +107,33 @@ class EnvironmentContractTests(unittest.TestCase):
         self.assertTrue(info['timeout'])
         timeout_environment.close()
 
+    def test_directional_observation_and_reverse_action_contract(self) -> None:
+        environment = LeoRoverEnv(
+            self.manifest,
+            split='train',
+            include_front_clearance=True,
+            include_directional_clearance=True,
+            linear_reverse_speed_max=0.10,
+            use_footprint_clearance=True,
+        )
+        observation, info = environment.reset(seed=4)
+        self.assertEqual(observation.shape, (56,))
+        self.assertTrue(environment.observation_space.contains(observation))
+        self.assertAlmostEqual(
+            float(observation[51]),
+            info['normalized_left_clearance'],
+        )
+        self.assertAlmostEqual(
+            float(observation[52]),
+            info['normalized_right_clearance'],
+        )
+
+        reverse = np.array([-1.0, 0.0], dtype=np.float32)
+        _, _, _, _, info = environment.step(reverse)
+        self.assertLess(info['command_linear'], 0.0)
+        self.assertFalse(info['safety_shield_active'])
+        environment.close()
+
     def test_footprint_mode_keeps_existing_54_value_contract(self) -> None:
         environment = LeoRoverEnv(
             self.manifest,

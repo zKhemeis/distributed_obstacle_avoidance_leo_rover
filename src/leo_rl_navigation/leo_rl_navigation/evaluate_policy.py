@@ -33,6 +33,8 @@ RESULT_FIELDS = (
     'minimum_footprint_clearance_m',
     'mean_linear_speed_mps',
     'mean_requested_linear_speed_mps',
+    'reverse_steps',
+    'mean_reverse_speed_mps',
     'front_blocked_steps',
     'mean_front_blocked_linear_speed_mps',
     'safety_intervention_steps',
@@ -112,6 +114,7 @@ def main() -> None:
         minimum_footprint_clearance = info['footprint_minimum_clearance']
         linear_speeds: list[float] = []
         requested_linear_speeds: list[float] = []
+        reverse_speeds: list[float] = []
         front_blocked_linear_speeds: list[float] = []
         angular_speeds: list[float] = []
         safety_interventions = 0
@@ -144,6 +147,8 @@ def main() -> None:
             )
             linear_speed = float(info['command_linear'])
             linear_speeds.append(linear_speed)
+            if linear_speed < -1e-6:
+                reverse_speeds.append(abs(linear_speed))
             requested_linear_speeds.append(float(
                 info['requested_command_linear']))
             safety_interventions += int(info['safety_shield_active'])
@@ -186,6 +191,11 @@ def main() -> None:
                 float(np.mean(linear_speeds)), 6),
             'mean_requested_linear_speed_mps': round(
                 float(np.mean(requested_linear_speeds)), 6),
+            'reverse_steps': len(reverse_speeds),
+            'mean_reverse_speed_mps': round(
+                float(np.mean(reverse_speeds)) if reverse_speeds else 0.0,
+                6,
+            ),
             'front_blocked_steps': len(front_blocked_linear_speeds),
             'mean_front_blocked_linear_speed_mps': round(
                 float(np.mean(front_blocked_linear_speeds))
@@ -204,6 +214,9 @@ def main() -> None:
     collisions = sum(row['collision'] for row in rows)
     timeouts = sum(row['timeout'] for row in rows)
     stuck = sum(row['stuck'] for row in rows)
+    reverse_steps = sum(row['reverse_steps'] for row in rows)
+    safety_interventions = sum(
+        row['safety_intervention_steps'] for row in rows)
     print(f'policy={policy_name}')
     print(f'safety_shield={environment.enable_safety_shield}')
     print(f'split={args.split}')
@@ -212,6 +225,8 @@ def main() -> None:
     print(f'collisions={collisions}')
     print(f'timeouts={timeouts}')
     print(f'stuck={stuck}')
+    print(f'reverse_steps={reverse_steps}')
+    print(f'safety_intervention_steps={safety_interventions}')
     print(f'success_rate={successes / max(len(rows), 1):.6f}')
     print(f'collision_rate={collisions / max(len(rows), 1):.6f}')
     print(f'stuck_rate={stuck / max(len(rows), 1):.6f}')

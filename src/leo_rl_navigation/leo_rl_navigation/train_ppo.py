@@ -48,9 +48,9 @@ def _expand_policy_observation(
     target_model: PPO,
     inserted_index: int,
 ) -> int:
-    """Copy a policy into a model with one inserted observation feature.
+    """Copy a policy into a model with inserted observation features.
 
-    The new input column is initialized to zero. Consequently, the expanded
+    The new input columns are initialized to zero. Consequently, the expanded
     policy initially produces the same outputs as the source policy while the
     new feature remains available for subsequent fine-tuning.
     """
@@ -63,10 +63,11 @@ def _expand_policy_observation(
 
     source_width = int(source_shape[0])
     target_width = int(target_shape[0])
-    if target_width != source_width + 1:
+    inserted_features = target_width - source_width
+    if inserted_features <= 0:
         raise ValueError(
-            'Expanded target observation must contain exactly one additional '
-            f'feature: source={source_width}, target={target_width}')
+            'Expanded target observation must contain additional features: '
+            f'source={source_width}, target={target_width}')
     if not 0 <= inserted_index <= source_width:
         raise ValueError(
             f'Inserted observation index must be in [0, {source_width}]')
@@ -102,7 +103,7 @@ def _expand_policy_observation(
         expanded_tensor = torch.zeros_like(target_tensor)
         expanded_tensor[:, :inserted_index] = (
             source_tensor[:, :inserted_index])
-        expanded_tensor[:, inserted_index + 1:] = (
+        expanded_tensor[:, inserted_index + inserted_features:] = (
             source_tensor[:, inserted_index:])
         expanded_state[name] = expanded_tensor
         expanded_parameters += 1
@@ -154,8 +155,8 @@ def main() -> None:
         '--expand-observation-at-index',
         type=int,
         help=(
-            'Expand a one-dimensional --initial-model observation by one '
-            'feature at this zero-based index. The inserted input weights '
+            'Expand a one-dimensional --initial-model observation by the '
+            'required number of features at this zero-based index. Inserted weights '
             'start at zero, preserving the source policy exactly.'
         ),
     )
@@ -178,14 +179,6 @@ def main() -> None:
     if args.save_initialized_model_only and not args.initial_model:
         raise ValueError(
             '--save-initialized-model-only requires --initial-model')
-    if (
-        args.reset_linear_action_head and
-        args.expand_observation_at_index is not None
-    ):
-        raise ValueError(
-            '--reset-linear-action-head and --expand-observation-at-index '
-            'cannot be combined')
-
     config = load_config(args.config)
     training = config['training']
     ppo_config = config['ppo']
@@ -312,9 +305,14 @@ def main() -> None:
                 model,
                 args.expand_observation_at_index,
             )
+            inserted_features = (
+                model.observation_space.shape[0] -
+                initial_model.observation_space.shape[0]
+            )
             print(
                 'expanded_observation=true '
                 f'inserted_index={args.expand_observation_at_index} '
+                f'inserted_features={inserted_features} '
                 f'expanded_parameters={expanded_policy_parameters}'
             )
         if args.reset_linear_action_head:

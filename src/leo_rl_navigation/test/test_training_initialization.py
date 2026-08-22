@@ -121,10 +121,44 @@ class TrainingInitializationTests(unittest.TestCase):
             torch.zeros(3),
         ))
 
-    def test_observation_expansion_requires_one_new_feature(self) -> None:
+    def test_observation_expansion_preserves_two_directional_features(self) -> None:
         action_space = object()
         source = _ExpandableModel(3, action_space)
         target = _ExpandableModel(5, action_space)
+
+        with torch.no_grad():
+            for index, parameter in enumerate(source.policy.parameters()):
+                parameter.copy_(torch.arange(
+                    parameter.numel(),
+                    dtype=parameter.dtype,
+                ).reshape(parameter.shape) + index)
+
+        expanded = _expand_policy_observation(
+            source,
+            target,
+            inserted_index=2,
+        )
+        self.assertEqual(expanded, 2)
+
+        source_observation = torch.tensor([[0.2, -0.4, 0.7]])
+        target_observation = torch.tensor([[0.2, -0.4, 0.1, 0.9, 0.7]])
+        self.assertTrue(torch.equal(
+            source.policy.policy_input(source_observation),
+            target.policy.policy_input(target_observation),
+        ))
+        self.assertTrue(torch.equal(
+            source.policy.value_input(source_observation),
+            target.policy.value_input(target_observation),
+        ))
+        self.assertTrue(torch.equal(
+            target.policy.policy_input.weight[:, 2:4],
+            torch.zeros((3, 2)),
+        ))
+
+    def test_observation_expansion_requires_additional_features(self) -> None:
+        action_space = object()
+        source = _ExpandableModel(3, action_space)
+        target = _ExpandableModel(3, action_space)
 
         with self.assertRaises(ValueError):
             _expand_policy_observation(

@@ -144,6 +144,85 @@ class PolicyIoTests(unittest.TestCase):
         self.assertAlmostEqual(linear, 0.125)
         self.assertAlmostEqual(angular, 0.0)
 
+    def test_reversible_action_contract(self) -> None:
+        reverse, angular = action_to_command(
+            np.array([-1.0, -0.5], dtype=np.float32),
+            linear_speed_max=0.25,
+            angular_speed_max=0.8,
+            linear_reverse_speed_max=0.10,
+        )
+        self.assertAlmostEqual(reverse, -0.10)
+        self.assertAlmostEqual(angular, -0.40)
+
+        forward, _ = action_to_command(
+            np.array([1.0, 0.0], dtype=np.float32),
+            linear_speed_max=0.25,
+            angular_speed_max=0.8,
+            linear_reverse_speed_max=0.10,
+        )
+        self.assertAlmostEqual(forward, 0.25)
+
+    def test_directional_escape_features_use_side_sector_medians(self) -> None:
+        ranges = np.full(500, 12.0, dtype=np.float32)
+        ranges[:20] = 0.45
+        ranges[-20:] = 0.45
+        ranges[35:120] = 3.5
+        ranges[-120:-35] = 1.2
+
+        observation, measurements = build_observation(
+            ranges,
+            pose_x=0.0,
+            pose_y=0.0,
+            pose_yaw=0.0,
+            goal_x=1.0,
+            goal_y=0.0,
+            number_of_rays=500,
+            n_sectors=50,
+            range_min=0.05,
+            range_max=12.0,
+            maximum_goal_distance=math.sqrt(200.0),
+            include_front_clearance=True,
+            include_directional_clearance=True,
+            directional_normalization_distance=3.0,
+            use_footprint_clearance=True,
+        )
+
+        self.assertEqual(observation.shape, (56,))
+        self.assertAlmostEqual(
+            float(observation[50]),
+            measurements['normalized_front_clearance'],
+        )
+        self.assertAlmostEqual(
+            float(observation[51]),
+            measurements['normalized_left_clearance'],
+        )
+        self.assertAlmostEqual(
+            float(observation[52]),
+            measurements['normalized_right_clearance'],
+        )
+        self.assertGreater(float(observation[51]), float(observation[52]))
+        self.assertAlmostEqual(
+            float(observation[53]),
+            1.0 / math.sqrt(200.0),
+        )
+
+    def test_directional_features_require_front_feature(self) -> None:
+        with self.assertRaises(ValueError):
+            build_observation(
+                np.full(500, 12.0, dtype=np.float32),
+                pose_x=0.0,
+                pose_y=0.0,
+                pose_yaw=0.0,
+                goal_x=1.0,
+                goal_y=0.0,
+                number_of_rays=500,
+                n_sectors=50,
+                range_min=0.05,
+                range_max=12.0,
+                maximum_goal_distance=math.sqrt(200.0),
+                include_directional_clearance=True,
+            )
+
     def test_footprint_clearance_detects_front_wheel_corner(self) -> None:
         ranges = np.full(500, 12.0, dtype=np.float32)
         angle_increment = 2.0 * math.pi / 500.0

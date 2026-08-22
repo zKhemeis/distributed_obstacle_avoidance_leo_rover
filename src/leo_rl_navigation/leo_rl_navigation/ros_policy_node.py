@@ -62,6 +62,18 @@ class RosPolicyNode(Node):
         self.front_normalization_distance = float(
             self.declare_parameter(
                 'front_normalization_distance', 0.80).value)
+        self.include_directional_clearance = bool(
+            self.declare_parameter(
+                'include_directional_clearance', False).value)
+        self.directional_normalization_distance = float(
+            self.declare_parameter(
+                'directional_normalization_distance', 3.0).value)
+        self.directional_inner_angle_deg = float(
+            self.declare_parameter(
+                'directional_inner_angle_deg', 25.0).value)
+        self.directional_outer_angle_deg = float(
+            self.declare_parameter(
+                'directional_outer_angle_deg', 85.0).value)
         self.use_footprint_clearance = bool(
             self.declare_parameter('use_footprint_clearance', False).value)
         self.footprint_half_length = float(
@@ -84,6 +96,8 @@ class RosPolicyNode(Node):
             self.declare_parameter('safety_minimum_turn_speed', 0.40).value)
         self.linear_speed_max = float(
             self.declare_parameter('linear_speed_max', 0.25).value)
+        self.linear_reverse_speed_max = float(
+            self.declare_parameter('linear_reverse_speed_max', 0.0).value)
         self.angular_speed_max = float(
             self.declare_parameter('angular_speed_max', 0.80).value)
         self.goal_tolerance = float(
@@ -102,7 +116,8 @@ class RosPolicyNode(Node):
 
         self.model = PPO.load(str(self.model_path), device='cpu')
         expected_observation_size = (
-            self.n_sectors + 3 + int(self.include_front_clearance))
+            self.n_sectors + 3 + int(self.include_front_clearance) +
+            2 * int(self.include_directional_clearance))
         if self.model.observation_space.shape != (expected_observation_size,):
             raise ValueError(
                 'Model observation shape does not match the ROS configuration: '
@@ -140,6 +155,8 @@ class RosPolicyNode(Node):
             f'Goal: ({self.goal_x:.6f}, {self.goal_y:.6f}); '
             f'control={self.control_hz:.1f} Hz; '
             f'footprint_clearance={self.use_footprint_clearance}; '
+            f'directional_clearance={self.include_directional_clearance}; '
+            f'reverse_max={self.linear_reverse_speed_max:.3f}; '
             f'safety_shield={self.enable_safety_shield}')
 
     def _scan_callback(self, message: LaserScan) -> None:
@@ -224,6 +241,12 @@ class RosPolicyNode(Node):
             include_front_clearance=self.include_front_clearance,
             front_normalization_distance=(
                 self.front_normalization_distance),
+            include_directional_clearance=(
+                self.include_directional_clearance),
+            directional_normalization_distance=(
+                self.directional_normalization_distance),
+            directional_inner_angle_deg=self.directional_inner_angle_deg,
+            directional_outer_angle_deg=self.directional_outer_angle_deg,
             use_footprint_clearance=self.use_footprint_clearance,
             footprint_half_length=self.footprint_half_length,
             footprint_half_width=self.footprint_half_width,
@@ -253,6 +276,7 @@ class RosPolicyNode(Node):
             action,
             linear_speed_max=self.linear_speed_max,
             angular_speed_max=self.angular_speed_max,
+            linear_reverse_speed_max=self.linear_reverse_speed_max,
         )
         linear_velocity, angular_velocity, shield_active = (
             apply_footprint_safety(
@@ -278,6 +302,8 @@ class RosPolicyNode(Node):
             f'min_scan={measurements["minimum_scan"]:.3f} '
             f'front_scan={measurements["front_minimum_scan"]:.3f} '
             f'body_clearance={measurements["footprint_minimum_clearance"]:.3f} '
+            f'escape_left={measurements["footprint_left_escape_clearance"]:.3f} '
+            f'escape_right={measurements["footprint_right_escape_clearance"]:.3f} '
             f'raw_v={requested_linear:.3f} '
             f'shield={str(shield_active).lower()} '
             f'v={linear_velocity:.3f} w={angular_velocity:.3f}',

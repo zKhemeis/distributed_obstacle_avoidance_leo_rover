@@ -39,6 +39,7 @@ class LeoRoverEnv(gym.Env):
         n_sectors: int = 50,
         linear_speed_max: float = 0.25,
         angular_speed_max: float = 0.80,
+        linear_reverse_speed_max: float = 0.0,
         maximum_goal_distance: float = math.sqrt(200.0),
         goal_tolerance: float = 0.25,
         maximum_episode_steps: int = 400,
@@ -53,8 +54,16 @@ class LeoRoverEnv(gym.Env):
         front_half_angle_deg: float = 30.0,
         include_front_clearance: bool = False,
         front_normalization_distance: float = 0.80,
+        include_directional_clearance: bool = False,
+        directional_normalization_distance: float = 3.0,
+        directional_inner_angle_deg: float = 25.0,
+        directional_outer_angle_deg: float = 85.0,
         front_safety_distance: float = 0.0,
         front_unsafe_speed_penalty_weight: float = 0.0,
+        escape_turn_reward_weight: float = 0.0,
+        clearance_progress_reward_weight: float = 0.0,
+        escape_reverse_reward_weight: float = 0.0,
+        reverse_penalty_weight: float = 0.0,
         use_footprint_clearance: bool = False,
         footprint_half_length: float = 0.215,
         footprint_half_width: float = 0.259,
@@ -88,13 +97,21 @@ class LeoRoverEnv(gym.Env):
             raise ValueError('maximum_episode_steps must be positive')
         nonnegative_values = {
             'timeout_penalty': timeout_penalty,
+            'linear_reverse_speed_max': linear_reverse_speed_max,
             'safety_distance': safety_distance,
             'proximity_penalty_weight': proximity_penalty_weight,
             'unsafe_speed_penalty_weight': unsafe_speed_penalty_weight,
             'front_safety_distance': front_safety_distance,
             'front_normalization_distance': front_normalization_distance,
+            'directional_normalization_distance': (
+                directional_normalization_distance),
             'front_unsafe_speed_penalty_weight': (
                 front_unsafe_speed_penalty_weight),
+            'escape_turn_reward_weight': escape_turn_reward_weight,
+            'clearance_progress_reward_weight': (
+                clearance_progress_reward_weight),
+            'escape_reverse_reward_weight': escape_reverse_reward_weight,
+            'reverse_penalty_weight': reverse_penalty_weight,
             'footprint_half_length': footprint_half_length,
             'footprint_half_width': footprint_half_width,
             'safety_stop_distance': safety_stop_distance,
@@ -120,6 +137,7 @@ class LeoRoverEnv(gym.Env):
         self.n_sectors = int(n_sectors)
         self.linear_speed_max = float(linear_speed_max)
         self.angular_speed_max = float(angular_speed_max)
+        self.linear_reverse_speed_max = float(linear_reverse_speed_max)
         self.maximum_goal_distance = float(maximum_goal_distance)
         self.goal_tolerance = float(goal_tolerance)
         self.maximum_episode_steps = int(maximum_episode_steps)
@@ -136,9 +154,23 @@ class LeoRoverEnv(gym.Env):
         self.include_front_clearance = bool(include_front_clearance)
         self.front_normalization_distance = float(
             front_normalization_distance)
+        self.include_directional_clearance = bool(
+            include_directional_clearance)
+        self.directional_normalization_distance = float(
+            directional_normalization_distance)
+        self.directional_inner_angle_deg = float(
+            directional_inner_angle_deg)
+        self.directional_outer_angle_deg = float(
+            directional_outer_angle_deg)
         self.front_safety_distance = float(front_safety_distance)
         self.front_unsafe_speed_penalty_weight = float(
             front_unsafe_speed_penalty_weight)
+        self.escape_turn_reward_weight = float(escape_turn_reward_weight)
+        self.clearance_progress_reward_weight = float(
+            clearance_progress_reward_weight)
+        self.escape_reverse_reward_weight = float(
+            escape_reverse_reward_weight)
+        self.reverse_penalty_weight = float(reverse_penalty_weight)
         self.use_footprint_clearance = bool(use_footprint_clearance)
         self.footprint_half_length = float(footprint_half_length)
         self.footprint_half_width = float(footprint_half_width)
@@ -182,6 +214,8 @@ class LeoRoverEnv(gym.Env):
         nonnegative_features = self.n_sectors + 1
         if self.include_front_clearance:
             nonnegative_features += 1
+        if self.include_directional_clearance:
+            nonnegative_features += 2
         observation_low = np.concatenate((
             np.zeros(nonnegative_features, dtype=np.float32),
             np.array([-1.0, -1.0], dtype=np.float32),
@@ -307,10 +341,12 @@ class LeoRoverEnv(gym.Env):
         self,
         action: np.ndarray,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        previous_measurements = dict(self._latest_measurements)
         requested_linear, requested_angular = action_to_command(
             action,
             linear_speed_max=self.linear_speed_max,
             angular_speed_max=self.angular_speed_max,
+            linear_reverse_speed_max=self.linear_reverse_speed_max,
         )
         linear_velocity, angular_velocity, shield_active = (
             apply_footprint_safety(
@@ -364,7 +400,8 @@ class LeoRoverEnv(gym.Env):
                 (self.safety_distance - measurements['minimum_scan']) /
                 self.safety_distance,
             )
-        normalized_linear_speed = requested_linear / self.linear_speed_max
+        normalized_linear_speed = (
+            max(requested_linear, 0.0) / self.linear_speed_max)
         reward_proximity = (
             -self.proximity_penalty_weight * clearance_ratio ** 2)
         reward_unsafe_speed = (
@@ -385,6 +422,65 @@ class LeoRoverEnv(gym.Env):
         reward_front_unsafe_speed = (
             -self.front_unsafe_speed_penalty_weight *
             normalized_linear_speed * front_clearance_ratio)
+        previous_front_clearance = (
+            previous_measurements['footprint_minimum_clearance']
+            if self.use_footprint_clearance
+            else previous_measurements['front_minimum_scan']
+        )
+        previous_front_blocked_ratio = 0.0
+        if self.front_safety_distance > 0.0:
+            previous_front_blocked_ratio = float(np.clip(
+                (self.front_safety_distance - previous_front_clearance) /
+                self.front_safety_distance,
+                0.0,
+                1.0,
+            ))
+        directional_advantage = float(np.clip(
+            (
+                previous_measurements['footprint_left_escape_clearance'] -
+                previous_measurements['footprint_right_escape_clearance']
+            ) / self.directional_normalization_distance,
+            -1.0,
+            1.0,
+        ))
+        reward_escape_turn = (
+            self.escape_turn_reward_weight *
+            previous_front_blocked_ratio *
+            directional_advantage *
+            requested_angular / self.angular_speed_max
+        )
+        current_front_clearance = (
+            measurements['footprint_minimum_clearance']
+            if self.use_footprint_clearance
+            else measurements['front_minimum_scan']
+        )
+        clearance_progress = float(np.clip(
+            (current_front_clearance - previous_front_clearance) /
+            max(self.front_safety_distance, 1e-9),
+            -1.0,
+            1.0,
+        ))
+        reward_clearance_progress = (
+            self.clearance_progress_reward_weight *
+            previous_front_blocked_ratio *
+            clearance_progress
+        )
+        reverse_ratio = 0.0
+        if self.linear_reverse_speed_max > 0.0:
+            reverse_ratio = (
+                max(-requested_linear, 0.0) /
+                self.linear_reverse_speed_max
+            )
+        reward_escape_reverse = (
+            self.escape_reverse_reward_weight *
+            previous_front_blocked_ratio *
+            reverse_ratio
+        )
+        reward_reverse = (
+            -self.reverse_penalty_weight *
+            (1.0 - previous_front_blocked_ratio) *
+            reverse_ratio
+        )
         reward_safety_intervention = (
             -self.safety_intervention_penalty_weight *
             max(requested_linear - linear_velocity, 0.0) /
@@ -394,6 +490,8 @@ class LeoRoverEnv(gym.Env):
             reward_progress + reward_time + reward_goal + reward_collision +
             reward_timeout + reward_stuck + reward_proximity +
             reward_unsafe_speed + reward_front_unsafe_speed +
+            reward_escape_turn + reward_clearance_progress +
+            reward_escape_reverse + reward_reverse +
             reward_safety_intervention)
         self._previous_distance = distance
 
@@ -411,6 +509,10 @@ class LeoRoverEnv(gym.Env):
             'reward_unsafe_speed': float(reward_unsafe_speed),
             'reward_front_unsafe_speed': float(
                 reward_front_unsafe_speed),
+            'reward_escape_turn': float(reward_escape_turn),
+            'reward_clearance_progress': float(reward_clearance_progress),
+            'reward_escape_reverse': float(reward_escape_reverse),
+            'reward_reverse': float(reward_reverse),
             'reward_safety_intervention': float(
                 reward_safety_intervention),
         }
@@ -429,7 +531,7 @@ class LeoRoverEnv(gym.Env):
             return False
         if len(self._pose_history) < self.stuck_window_steps + 1:
             return False
-        if linear_velocity < self.stuck_minimum_command_speed:
+        if abs(linear_velocity) < self.stuck_minimum_command_speed:
             return False
 
         old_x, old_y, old_yaw = self._pose_history[0]
@@ -467,6 +569,12 @@ class LeoRoverEnv(gym.Env):
             include_front_clearance=self.include_front_clearance,
             front_normalization_distance=(
                 self.front_normalization_distance),
+            include_directional_clearance=(
+                self.include_directional_clearance),
+            directional_normalization_distance=(
+                self.directional_normalization_distance),
+            directional_inner_angle_deg=self.directional_inner_angle_deg,
+            directional_outer_angle_deg=self.directional_outer_angle_deg,
             use_footprint_clearance=self.use_footprint_clearance,
             footprint_half_length=self.footprint_half_length,
             footprint_half_width=self.footprint_half_width,

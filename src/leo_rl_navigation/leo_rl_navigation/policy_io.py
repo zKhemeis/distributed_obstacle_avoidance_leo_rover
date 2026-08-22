@@ -23,6 +23,8 @@ def _footprint_measurements(
     lidar_offset_x: float,
     lidar_offset_y: float,
     footprint_half_angle_deg: float,
+    directional_inner_angle_deg: float,
+    directional_outer_angle_deg: float,
 ) -> dict[str, float]:
     """Measure obstacle clearance from the rectangular wheel footprint."""
     if footprint_half_length <= 0.0 or footprint_half_width <= 0.0:
@@ -33,6 +35,9 @@ def _footprint_measurements(
         raise ValueError('LiDAR y offset must lie inside the footprint')
     if not 0.0 < footprint_half_angle_deg <= 180.0:
         raise ValueError('Footprint half angle must be in (0, 180]')
+    if not 0.0 <= directional_inner_angle_deg < directional_outer_angle_deg <= 180.0:
+        raise ValueError(
+            'Directional escape angles must satisfy 0 <= inner < outer <= 180')
 
     angles = np.arange(canonical_ranges.size, dtype=np.float64)
     angles *= angle_increment
@@ -73,6 +78,10 @@ def _footprint_measurements(
         np.argmin(clearances[forward])])
     left = forward & (angles > 1e-12)
     right = forward & (angles < -1e-12)
+    inner_angle = math.radians(directional_inner_angle_deg)
+    outer_angle = math.radians(directional_outer_angle_deg)
+    escape_left = (angles >= inner_angle) & (angles <= outer_angle)
+    escape_right = (angles <= -inner_angle) & (angles >= -outer_angle)
 
     return {
         'footprint_minimum_clearance': float(clearances[nearest_index]),
@@ -82,6 +91,14 @@ def _footprint_measurements(
             clearances[left].min() if np.any(left) else range_max),
         'footprint_right_clearance': float(
             clearances[right].min() if np.any(right) else range_max),
+        # A minimum on either side is dominated by the same head-on obstacle.
+        # A side-sector median instead describes the space available to escape.
+        'footprint_left_escape_clearance': float(
+            np.median(clearances[escape_left])
+            if np.any(escape_left) else range_max),
+        'footprint_right_escape_clearance': float(
+            np.median(clearances[escape_right])
+            if np.any(escape_right) else range_max),
     }
 
 
@@ -103,6 +120,10 @@ def build_observation(
     front_half_angle_deg: float = 30.0,
     include_front_clearance: bool = False,
     front_normalization_distance: float = 0.80,
+    include_directional_clearance: bool = False,
+    directional_normalization_distance: float = 3.0,
+    directional_inner_angle_deg: float = 25.0,
+    directional_outer_angle_deg: float = 85.0,
     use_footprint_clearance: bool = False,
     footprint_half_length: float = 0.215,
     footprint_half_width: float = 0.259,
@@ -124,6 +145,11 @@ def build_observation(
         raise ValueError('front_half_angle_deg must be in (0, 180)')
     if front_normalization_distance <= 0.0:
         raise ValueError('front_normalization_distance must be positive')
+    if directional_normalization_distance <= 0.0:
+        raise ValueError('directional_normalization_distance must be positive')
+    if include_directional_clearance and not include_front_clearance:
+        raise ValueError(
+            'Directional clearance observations require explicit front clearance')
 
     if angle_increment is None:
         angle_increment = 2.0 * math.pi / number_of_rays
@@ -181,6 +207,8 @@ def build_observation(
         lidar_offset_x=lidar_offset_x,
         lidar_offset_y=lidar_offset_y,
         footprint_half_angle_deg=footprint_half_angle_deg,
+        directional_inner_angle_deg=directional_inner_angle_deg,
+        directional_outer_angle_deg=directional_outer_angle_deg,
     )
     observed_clearance = (
         footprint['footprint_minimum_clearance']
@@ -190,6 +218,16 @@ def build_observation(
         observed_clearance / front_normalization_distance,
         1.0,
     )
+    normalized_left_clearance = min(
+        footprint['footprint_left_escape_clearance'] /
+        directional_normalization_distance,
+        1.0,
+    )
+    normalized_right_clearance = min(
+        footprint['footprint_right_escape_clearance'] /
+        directional_normalization_distance,
+        1.0,
+    )
     navigation_features = [
         normalized_distance,
         math.sin(relative_bearing),
@@ -197,6 +235,11 @@ def build_observation(
     ]
     if include_front_clearance:
         navigation_features.insert(0, normalized_front_clearance)
+    if include_directional_clearance:
+        navigation_features[1:1] = [
+            normalized_left_clearance,
+            normalized_right_clearance,
+        ]
 
     observation = np.concatenate((
         normalized_ranges,
@@ -210,6 +253,8 @@ def build_observation(
         'front_minimum_scan': front_minimum_scan,
         'normalized_front_clearance': float(
             normalized_front_clearance),
+        'normalized_left_clearance': float(normalized_left_clearance),
+        'normalized_right_clearance': float(normalized_right_clearance),
         'pose_x': float(pose_x),
         'pose_y': float(pose_y),
         'pose_yaw': float(pose_yaw),
@@ -223,10 +268,13 @@ def action_to_command(
     *,
     linear_speed_max: float,
     angular_speed_max: float,
+    linear_reverse_speed_max: float = 0.0,
 ) -> tuple[float, float]:
     """Map the normalized policy action to a velocity command."""
     if linear_speed_max <= 0.0 or angular_speed_max <= 0.0:
         raise ValueError('Speed limits must be positive')
+    if linear_reverse_speed_max < 0.0:
+        raise ValueError('Reverse speed limit must be non-negative')
 
     action_array = np.asarray(action, dtype=np.float32)
     if action_array.shape != (2,):
@@ -236,7 +284,9 @@ def action_to_command(
     action_array = np.clip(action_array, -1.0, 1.0)
 
     linear_velocity = (
-        (float(action_array[0]) + 1.0) * 0.5 * linear_speed_max)
+        (float(action_array[0]) + 1.0) * 0.5 *
+        (linear_speed_max + linear_reverse_speed_max) -
+        linear_reverse_speed_max)
     angular_velocity = float(action_array[1]) * angular_speed_max
     return linear_velocity, angular_velocity
 

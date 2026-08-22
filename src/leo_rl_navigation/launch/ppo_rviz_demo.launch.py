@@ -130,6 +130,18 @@ def _launch_scenario(context):
             'front_normalization_distance:='
             f'{configured("front_normalization_distance", 0.80)}'),
         '-p', (
+            'include_directional_clearance:='
+            f'{str(bool(configured("include_directional_clearance", False))).lower()}'),
+        '-p', (
+            'directional_normalization_distance:='
+            f'{configured("directional_normalization_distance", 3.0)}'),
+        '-p', (
+            'directional_inner_angle_deg:='
+            f'{configured("directional_inner_angle_deg", 25.0)}'),
+        '-p', (
+            'directional_outer_angle_deg:='
+            f'{configured("directional_outer_angle_deg", 85.0)}'),
+        '-p', (
             'use_footprint_clearance:='
             f'{str(bool(configured("use_footprint_clearance", False))).lower()}'),
         '-p', (
@@ -154,6 +166,9 @@ def _launch_scenario(context):
             'safety_minimum_turn_speed:='
             f'{configured("safety_minimum_turn_speed", 0.40)}'),
         '-p', f'linear_speed_max:={configured("linear_speed_max", 0.25)}',
+        '-p', (
+            'linear_reverse_speed_max:='
+            f'{configured("linear_reverse_speed_max", 0.0)}'),
         '-p', f'angular_speed_max:={configured("angular_speed_max", 0.80)}',
         '-p', f'goal_tolerance:={configured("goal_tolerance", 0.25)}',
         '-p', (
@@ -175,6 +190,8 @@ def _launch_scenario(context):
             f'goal=({goal_x:.6f}, {goal_y:.6f}); '
             f'detailed_model={detailed_model}; '
             f'explicit_front_clearance={explicit_front_clearance}; '
+            'directional_clearance='
+            f'{bool(configured("include_directional_clearance", False))}; '
             f'safety_shield={safety_shield}')),
         Node(
             package='leo_pybullet',
