@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+<rect width="100%" height="100%" fill="#f7f7f7" stroke="#222" stroke-width="3"/>
+<rect x="-53.59" y="-41.59" width="95.18" height="1083.18" fill="#e45756" opacity="0.18"/>
+<rect x="-12.00" y="0.00" width="12.00" height="1000.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="-6.00" y="500.00" text-anchor="middle" font-size="12" fill="white">boundary_left</text>
+<rect x="958.41" y="-41.59" width="95.18" height="1083.18" fill="#e45756" opacity="0.18"/>
+<rect x="1000.00" y="0.00" width="12.00" height="1000.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="1006.00" y="500.00" text-anchor="middle" font-size="12" fill="white">boundary_right</text>
+<rect x="-41.59" y="958.41" width="1083.18" height="95.18" fill="#e45756" opacity="0.18"/>
+<rect x="0.00" y="1000.00" width="1000.00" height="12.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="500.00" y="1006.00" text-anchor="middle" font-size="12" fill="white">boundary_bottom</text>
+<rect x="-41.59" y="-53.59" width="1083.18" height="95.18" fill="#e45756" opacity="0.18"/>
+<rect x="0.00" y="-12.00" width="1000.00" height="12.00" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="500.00" y="-6.00" text-anchor="middle" font-size="12" fill="white">boundary_top</text>
+<rect x="410.42" y="95.43" width="184.33" height="193.05" fill="#e45756" opacity="0.18"/>
+<rect x="452.01" y="137.02" width="101.15" height="109.87" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="502.59" y="191.96" text-anchor="middle" font-size="12" fill="white">box_000</text>
+<rect x="498.71" y="222.46" width="184.57" height="203.42" fill="#e45756" opacity="0.18"/>
+<rect x="540.30" y="264.05" width="101.39" height="120.24" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="591.00" y="324.17" text-anchor="middle" font-size="12" fill="white">box_001</text>
+<rect x="118.31" y="799.55" width="145.54" height="144.70" fill="#e45756" opacity="0.18"/>
+<rect x="159.90" y="841.14" width="62.36" height="61.52" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="191.07" y="871.90" text-anchor="middle" font-size="12" fill="white">box_002</text>
+<rect x="159.46" y="47.28" width="129.24" height="158.93" fill="#e45756" opacity="0.18"/>
+<rect x="201.05" y="88.87" width="46.06" height="75.75" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="224.08" y="126.74" text-anchor="middle" font-size="12" fill="white">box_003</text>
+<rect x="93.77" y="484.04" width="144.90" height="118.30" fill="#e45756" opacity="0.18"/>
+<rect x="135.36" y="525.63" width="61.72" height="35.12" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="166.23" y="543.19" text-anchor="middle" font-size="12" fill="white">box_004</text>
+<rect x="855.74" y="787.82" width="136.43" height="126.01" fill="#e45756" opacity="0.18"/>
+<rect x="897.33" y="829.41" width="53.25" height="42.84" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="923.96" y="850.82" text-anchor="middle" font-size="12" fill="white">box_005</text>
+<rect x="244.95" y="334.70" width="128.29" height="144.72" fill="#e45756" opacity="0.18"/>
+<rect x="286.54" y="376.29" width="45.11" height="61.54" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="309.10" y="407.06" text-anchor="middle" font-size="12" fill="white">box_006</text>
+<rect x="172.55" y="499.83" width="146.28" height="160.14" fill="#e45756" opacity="0.18"/>
+<rect x="214.14" y="541.42" width="63.10" height="76.96" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="245.69" y="579.91" text-anchor="middle" font-size="12" fill="white">box_007</text>
+<rect x="693.91" y="8.47" width="130.84" height="140.39" fill="#e45756" opacity="0.18"/>
+<rect x="735.50" y="50.06" width="47.66" height="57.22" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="759.33" y="78.67" text-anchor="middle" font-size="12" fill="white">box_008</text>
+<rect x="736.48" y="590.64" width="137.09" height="119.75" fill="#e45756" opacity="0.18"/>
+<rect x="778.07" y="632.23" width="53.91" height="36.57" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="805.02" y="650.51" text-anchor="middle" font-size="12" fill="white">box_009</text>
+<rect x="227.35" y="262.70" width="152.14" height="137.05" fill="#e45756" opacity="0.18"/>
+<rect x="268.94" y="304.29" width="68.97" height="53.87" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="303.43" y="331.23" text-anchor="middle" font-size="12" fill="white">box_010</text>
+<rect x="85.07" y="405.02" width="162.84" height="145.51" fill="#e45756" opacity="0.18"/>
+<rect x="126.66" y="446.61" width="79.66" height="62.33" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="166.49" y="477.77" text-anchor="middle" font-size="12" fill="white">box_011</text>
+<rect x="69.68" y="180.21" width="141.98" height="157.15" fill="#e45756" opacity="0.18"/>
+<rect x="111.27" y="221.80" width="58.80" height="73.97" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="140.67" y="258.79" text-anchor="middle" font-size="12" fill="white">box_012</text>
+<rect x="1.76" y="787.59" width="131.07" height="118.65" fill="#e45756" opacity="0.18"/>
+<rect x="43.35" y="829.18" width="47.89" height="35.48" fill="#e45756" stroke="#8b1e1e" stroke-width="2"/>
+<text x="67.29" y="846.92" text-anchor="middle" font-size="12" fill="white">box_013</text>
+<polyline points="344.00,112.00 352.00,120.00 360.00,128.00 368.00,136.00 376.00,144.00 384.00,152.00 392.00,160.00 400.00,168.00 400.00,176.00 400.00,184.00 400.00,192.00 400.00,200.00 400.00,208.00 400.00,216.00 400.00,224.00 400.00,232.00 400.00,240.00 400.00,248.00 400.00,256.00 400.00,264.00 400.00,272.00 400.00,280.00 400.00,288.00 400.00,296.00 400.00,304.00 400.00,312.00 400.00,320.00 400.00,328.00 400.00,336.00 408.00,344.00 416.00,352.00 424.00,360.00 432.00,368.00 440.00,376.00 448.00,384.00 456.00,392.00 464.00,400.00 472.00,408.00 480.00,416.00 488.00,424.00 496.00,432.00 504.00,432.00 512.00,432.00 520.00,432.00 528.00,432.00 536.00,432.00 544.00,432.00 552.00,432.00 560.00,432.00 568.00,432.00 576.00,432.00 584.00,432.00 592.00,432.00 600.00,432.00 608.00,432.00 616.00,432.00 624.00,432.00 632.00,432.00 640.00,432.00 648.00,432.00 656.00,432.00 664.00,432.00 672.00,432.00 680.00,432.00 688.00,432.00 696.00,432.00 704.00,432.00 712.00,432.00 720.00,432.00 728.00,432.00 736.00,432.00 744.00,432.00 752.00,432.00 760.00,432.00 768.00,432.00 776.00,424.00" fill="none" stroke="#3366cc" stroke-width="4"/>
+<circle cx="347.32" cy="115.79" r="10" fill="#2ca02c" stroke="#222" stroke-width="2"/>
+<text x="361.32" y="103.79" font-size="18" fill="#222">start</text>
+<circle cx="779.26" cy="426.06" r="10" fill="#ffbf00" stroke="#222" stroke-width="2"/>
+<text x="793.26" y="414.06" font-size="18" fill="#222">goal</text>
+</svg>
