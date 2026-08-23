@@ -1,4 +1,4 @@
-"""Evaluate Dijkstra navigation directly in the reusable Bullet core."""
+"""Evaluate LiDAR-only Dijkstra navigation in the reusable Bullet core."""
 
 from __future__ import annotations
 
@@ -13,11 +13,10 @@ from typing import Any
 import yaml
 from leo_bullet_sim import BulletSim, CONTROL_PHYSICS_STEPS
 
-from leo_heuristic_navigation.dijkstra_planner import plan_path
-from leo_heuristic_navigation.grid_map import load_grid_map
+from leo_heuristic_navigation.online_navigation import (
+    OnlineDijkstraNavigator,
+)
 from leo_heuristic_navigation.path_controller import (
-    ControllerConfig,
-    PathController,
     scan_clearances,
     wrap_angle,
 )
@@ -28,6 +27,8 @@ RESULT_FIELDS = (
     'split',
     'world_file',
     'method_name',
+    'obstacle_source',
+    'initial_known_obstacle_cells',
     'success',
     'collision',
     'timeout',
@@ -40,6 +41,8 @@ RESULT_FIELDS = (
     'planning_time_s',
     'expanded_cells',
     'replans',
+    'discovered_obstacle_cells',
+    'observed_free_cells',
     'minimum_scan_m',
     'minimum_front_scan_m',
     'mean_linear_speed_mps',
@@ -55,9 +58,10 @@ def _load_config(path: str | Path) -> dict[str, Any]:
         data = yaml.safe_load(stream)
     if not isinstance(data, dict):
         raise ValueError('Dijkstra configuration must be a mapping')
-    for section in ('planner', 'controller', 'evaluation'):
+    for section in ('planner', 'mapping', 'controller', 'evaluation'):
         if not isinstance(data.get(section), dict):
-            raise ValueError(f'Configuration is missing section: {section}')
+            raise ValueError(
+                f'LiDAR-only configuration is missing section: {section}')
     return data
 
 
@@ -124,7 +128,7 @@ def _write_results(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def main() -> None:
-    """Evaluate every requested manifest world once and write CSV metrics."""
+    """Evaluate each world using only goal, odometry, and LiDAR scans."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
     parser.add_argument('--manifest', required=True)
@@ -137,6 +141,7 @@ def main() -> None:
 
     config = _load_config(args.config)
     planner = config['planner']
+    mapping = config['mapping']
     controller_values = config['controller']
     evaluation = config['evaluation']
     manifest_path = Path(args.manifest).expanduser().resolve()
@@ -146,21 +151,6 @@ def main() -> None:
     if not rows:
         raise ValueError(f'No {args.split} worlds found in {manifest_path}')
 
-    controller_config = ControllerConfig(
-        linear_speed_max=float(controller_values['linear_speed_max']),
-        angular_speed_max=float(controller_values['angular_speed_max']),
-        heading_gain=float(controller_values['heading_gain']),
-        pivot_heading_threshold=float(
-            controller_values['pivot_heading_threshold']),
-        lookahead_distance=float(controller_values['lookahead_distance']),
-        waypoint_tolerance=float(controller_values['waypoint_tolerance']),
-        lidar_front_half_angle_deg=float(
-            controller_values['lidar_front_half_angle_deg']),
-        lidar_emergency_stop_distance=float(
-            controller_values['lidar_emergency_stop_distance']),
-        lidar_slowdown_distance=float(
-            controller_values['lidar_slowdown_distance']),
-    )
     maximum_steps = int(evaluation['maximum_episode_steps'])
     settle_steps = int(evaluation.get(
         'settle_physics_steps', CONTROL_PHYSICS_STEPS))
@@ -177,36 +167,22 @@ def main() -> None:
         start = (float(row['start_x']), float(row['start_y']))
         start_yaw = float(row['start_yaw'])
         goal = (float(row['goal_x']), float(row['goal_y']))
+
+        # Only the physics engine sees the world file. The navigator does not.
         simulation.reset(str(world), start[0], start[1], start_yaw)
         simulation.set_command(0.0, 0.0)
         simulation.step(settle_steps)
 
-        grid = load_grid_map(
-            world,
-            x_min=float(planner['arena_x_min']),
-            x_max=float(planner['arena_x_max']),
-            y_min=float(planner['arena_y_min']),
-            y_max=float(planner['arena_y_max']),
-            resolution=float(planner['grid_resolution']),
-            inflation_radius=float(planner['obstacle_inflation_radius']),
+        navigator = OnlineDijkstraNavigator(
+            planner=planner,
+            mapping=mapping,
+            controller=controller_values,
+            goal_x=goal[0],
+            goal_y=goal[1],
         )
-        planning_failure = False
-        plan = None
-        path_controller = None
-        try:
-            plan = plan_path(
-                grid,
-                start,
-                goal,
-                allow_diagonal=bool(planner['allow_diagonal']),
-            )
-            path_controller = PathController(plan.path, controller_config)
-        except (RuntimeError, ValueError):
-            planning_failure = True
-        initial_plan = plan
-        total_planning_time = (
-            plan.planning_time_s if plan is not None else 0.0)
-        total_expanded_cells = plan.expanded_cells if plan is not None else 0
+        initial_known_obstacles = len(navigator.mapper.obstacle_hits)
+        if initial_known_obstacles != 0:
+            raise AssertionError('LiDAR-only map must start without obstacles')
 
         state = simulation.robot_state()
         previous_x = float(state.transform.x)
@@ -218,18 +194,17 @@ def main() -> None:
         angular_speeds: list[float] = []
         pivot_steps = 0
         emergency_steps = 0
-        consecutive_emergency = 0
-        replans = 0
         success = False
         collision = False
         timeout = False
         stuck = False
+        planning_failure = False
         poses: deque[tuple[float, float, float]] = deque(
             maxlen=max(stuck_window + 1, 1))
         poses.append((previous_x, previous_y, float(state.yaw)))
         steps = 0
 
-        while not planning_failure and steps < maximum_steps:
+        while steps < maximum_steps:
             state = simulation.robot_state()
             distance = math.hypot(
                 goal[0] - state.transform.x,
@@ -239,7 +214,7 @@ def main() -> None:
             success = distance <= float(controller_values['goal_tolerance'])
             if collision or success:
                 break
-            assert path_controller is not None
+
             scan = simulation.laser_scan()
             finite_ranges = [
                 float(value) for value in scan.ranges
@@ -254,45 +229,29 @@ def main() -> None:
                 angle_min=float(scan.angle_min),
                 angle_increment=float(scan.angle_increment),
                 range_max=float(scan.range_max),
-                front_half_angle_deg=(
-                    controller_config.lidar_front_half_angle_deg),
+                front_half_angle_deg=float(
+                    controller_values['lidar_front_half_angle_deg']),
             )
             minimum_front_scan = min(minimum_front_scan, front)
-            command = path_controller.command(
-                x=float(state.transform.x),
-                y=float(state.transform.y),
-                yaw=float(state.yaw),
-                ranges=scan.ranges,
-                angle_min=float(scan.angle_min),
-                angle_increment=float(scan.angle_increment),
-                range_max=float(scan.range_max),
-            )
+
+            try:
+                update = navigator.update(
+                    robot_x=float(state.transform.x),
+                    robot_y=float(state.transform.y),
+                    robot_yaw=float(state.yaw),
+                    ranges=scan.ranges,
+                    angle_min=float(scan.angle_min),
+                    angle_increment=float(scan.angle_increment),
+                    range_min=float(scan.range_min),
+                    range_max=float(scan.range_max),
+                )
+            except (RuntimeError, ValueError):
+                planning_failure = True
+                break
+
+            command = update.command
             if command.emergency:
                 emergency_steps += 1
-                consecutive_emergency += 1
-            else:
-                consecutive_emergency = 0
-            if consecutive_emergency >= int(
-                    controller_values['emergency_replan_steps']):
-                try:
-                    plan = plan_path(
-                        grid,
-                        (float(state.transform.x), float(state.transform.y)),
-                        goal,
-                        allow_diagonal=bool(planner['allow_diagonal']),
-                    )
-                    path_controller = PathController(
-                        plan.path,
-                        controller_config,
-                    )
-                    total_planning_time += plan.planning_time_s
-                    total_expanded_cells += plan.expanded_cells
-                    replans += 1
-                except (RuntimeError, ValueError):
-                    planning_failure = True
-                    break
-                consecutive_emergency = 0
-
             simulation.set_command(command.linear, command.angular)
             simulation.step(CONTROL_PHYSICS_STEPS)
             steps += 1
@@ -344,7 +303,9 @@ def main() -> None:
             'episode': episode,
             'split': args.split,
             'world_file': str(world),
-            'method_name': 'dijkstra_v1',
+            'method_name': 'dijkstra_lidar_v2',
+            'obstacle_source': 'lidar_only',
+            'initial_known_obstacle_cells': initial_known_obstacles,
             'success': int(success),
             'collision': int(collision),
             'timeout': int(timeout),
@@ -355,10 +316,13 @@ def main() -> None:
                 steps / float(controller_values['control_hz']), 6),
             'path_length_m': round(path_length, 6),
             'planned_path_length_m': round(
-                initial_plan.cost_m, 6) if initial_plan else 0.0,
-            'planning_time_s': round(total_planning_time, 9),
-            'expanded_cells': total_expanded_cells,
-            'replans': replans,
+                navigator.initial_plan_cost_m, 6),
+            'planning_time_s': round(navigator.total_planning_time_s, 9),
+            'expanded_cells': navigator.total_expanded_cells,
+            'replans': navigator.replans,
+            'discovered_obstacle_cells': len(
+                navigator.mapper.obstacle_hits),
+            'observed_free_cells': len(navigator.mapper.observed_free),
             'minimum_scan_m': round(
                 minimum_scan if math.isfinite(minimum_scan) else 0.0, 6),
             'minimum_front_scan_m': round(
@@ -382,7 +346,9 @@ def main() -> None:
     timeouts = sum(int(row['timeout']) for row in results)
     stuck_count = sum(int(row['stuck']) for row in results)
     planning_failures = sum(int(row['planning_failure']) for row in results)
-    print('method=dijkstra_v1')
+    print('method=dijkstra_lidar_v2')
+    print('obstacle_source=lidar_only')
+    print('initial_known_obstacle_cells=0')
     print(f'split={args.split}')
     print(f'episodes={len(results)}')
     print(f'successes={successes}')

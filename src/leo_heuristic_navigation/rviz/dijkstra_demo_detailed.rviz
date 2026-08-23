@@ -50,6 +50,18 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /scan
+    - Alpha: 0.45
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: true
+      Name: LiDAR discovered occupancy
+      Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /dijkstra_discovered_map
     - Class: rviz_default_plugins/Path
       Color: 0; 170; 255
       Enabled: true

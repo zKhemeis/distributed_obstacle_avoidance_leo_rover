@@ -66,12 +66,14 @@ def _launch_scenario(context):
     if not isinstance(config, dict):
         raise ValueError(f'Configuration is not a mapping: {config_path}')
     planner = config.get('planner')
+    mapping = config.get('mapping')
     controller = config.get('controller')
     evaluation = config.get('evaluation')
     if not all(isinstance(section, dict) for section in (
-            planner, controller, evaluation)):
+            planner, mapping, controller, evaluation)):
         raise ValueError(
-            'Configuration needs planner, controller, and evaluation mappings')
+            'LiDAR-only configuration needs planner, mapping, '
+            'controller, and evaluation sections')
 
     with manifest.open(newline='', encoding='utf-8') as stream:
         rows = [
@@ -91,11 +93,14 @@ def _launch_scenario(context):
     goal_y = float(row['goal_y'])
 
     parameter_arguments = [
-        '-p', f'world_path:={world}',
         '-p', f'goal_x:={goal_x}',
         '-p', f'goal_y:={goal_y}',
     ]
     for name, value in planner.items():
+        rendered = (
+            str(value).lower() if isinstance(value, bool) else str(value))
+        parameter_arguments.extend(['-p', f'{name}:={rendered}'])
+    for name, value in mapping.items():
         rendered = (
             str(value).lower() if isinstance(value, bool) else str(value))
         parameter_arguments.extend(['-p', f'{name}:={rendered}'])
@@ -126,7 +131,7 @@ def _launch_scenario(context):
             f'Dijkstra benchmark {split}[{world_index}]: {world.name}; '
             f'start=({start_x:.6f}, {start_y:.6f}, {start_yaw:.6f}); '
             f'goal=({goal_x:.6f}, {goal_y:.6f}); '
-            f'detailed_model={detailed_model}')),
+            f'detailed_model={detailed_model}; obstacle_source=lidar_only')),
         Node(
             package='leo_pybullet',
             executable='pybullet_sim_node',
@@ -203,7 +208,8 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument(
             'config',
-            default_value=str(heuristic_share / 'config' / 'dijkstra_v1.yaml'),
+            default_value=str(
+                heuristic_share / 'config' / 'dijkstra_lidar_v2.yaml'),
         ),
         DeclareLaunchArgument(
             'manifest',

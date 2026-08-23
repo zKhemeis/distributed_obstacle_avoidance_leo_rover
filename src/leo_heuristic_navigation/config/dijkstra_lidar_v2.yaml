@@ -1,0 +1,39 @@
+planner:
+  arena_x_min: -5.0
+  arena_x_max: 5.0
+  arena_y_min: -5.0
+  arena_y_max: 5.0
+  grid_resolution: 0.08
+  obstacle_inflation_radius: 0.42
+  allow_diagonal: true
+
+mapping:
+  lidar_offset_x: 0.10
+  lidar_offset_y: 0.0
+  maximum_mapping_range: 5.0
+  ray_stride: 2
+  update_interval_steps: 2
+  periodic_replan_steps: 20
+
+controller:
+  control_hz: 10.0
+  linear_speed_max: 0.25
+  angular_speed_max: 0.80
+  heading_gain: 1.8
+  pivot_heading_threshold: 0.55
+  lookahead_distance: 0.40
+  waypoint_tolerance: 0.20
+  goal_tolerance: 0.25
+  lidar_front_half_angle_deg: 55.0
+  lidar_emergency_stop_distance: 0.24
+  lidar_slowdown_distance: 0.65
+  emergency_replan_steps: 5
+  sensor_timeout: 0.50
+
+evaluation:
+  maximum_episode_steps: 900
+  settle_physics_steps: 24
+  stuck_window_steps: 30
+  stuck_displacement_threshold: 0.05
+  stuck_yaw_threshold: 0.10
+  stuck_minimum_command_speed: 0.05
