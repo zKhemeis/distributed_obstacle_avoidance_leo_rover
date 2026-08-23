@@ -9,6 +9,7 @@ import torch
 from leo_rl_navigation.train_ppo import (
     _expand_policy_observation,
     _reset_linear_action_head,
+    _resolve_vectorized_backend,
     _transfer_continuous_navigation_backbone,
 )
 
@@ -58,6 +59,41 @@ class _ManeuverModel:
 
 
 class TrainingInitializationTests(unittest.TestCase):
+    def test_single_robot_uses_dummy_backend(self) -> None:
+        self.assertEqual(
+            _resolve_vectorized_backend('auto', 1),
+            'dummy',
+        )
+
+    def test_multiple_robots_use_subprocess_backend(self) -> None:
+        for robot_count in (2, 4, 10):
+            with self.subTest(robot_count=robot_count):
+                self.assertEqual(
+                    _resolve_vectorized_backend(
+                        'auto',
+                        robot_count,
+                    ),
+                    'subproc',
+                )
+
+    def test_explicit_backend_override_is_preserved(self) -> None:
+        self.assertEqual(
+            _resolve_vectorized_backend('dummy', 4),
+            'dummy',
+        )
+        self.assertEqual(
+            _resolve_vectorized_backend('subproc', 1),
+            'subproc',
+        )
+
+    def test_invalid_robot_count_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _resolve_vectorized_backend('auto', 0)
+
+    def test_invalid_vectorized_backend_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _resolve_vectorized_backend('invalid', 2)
+
     def test_only_linear_action_row_is_reset(self) -> None:
         model = _Model()
         with torch.no_grad():

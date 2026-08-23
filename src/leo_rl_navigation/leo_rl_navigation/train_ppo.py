@@ -13,7 +13,10 @@ from stable_baselines3.common.callbacks import (
     CheckpointCallback,
     EvalCallback,
 )
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    SubprocVecEnv,
+)
 
 from leo_rl_navigation.policy_io import DISCRETE_MANEUVER_TABLE
 from leo_rl_navigation.training_utils import load_config, make_environment
@@ -169,6 +172,26 @@ def _transfer_continuous_navigation_backbone(
 
     return copied_parameters
 
+def _resolve_vectorized_backend(
+    requested_backend: str,
+    n_envs: int,
+) -> str:
+    """Choose the vectorized-environment implementation."""
+    if n_envs <= 0:
+        raise ValueError('n_envs must be positive')
+
+    valid_backends = {'auto', 'dummy', 'subproc'}
+
+    if requested_backend not in valid_backends:
+        raise ValueError(
+            f'Unsupported vectorized backend: {requested_backend}'
+        )
+
+    if requested_backend == 'auto':
+        return 'dummy' if n_envs == 1 else 'subproc'
+
+    return requested_backend
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -176,6 +199,32 @@ def main() -> None:
     parser.add_argument('--run-dir', required=True)
     parser.add_argument('--total-timesteps', type=int)
     parser.add_argument('--n-envs', type=int)
+    parser.add_argument(
+        '--vec-env',
+        choices=('auto', 'dummy', 'subproc'),
+        default='auto',
+        help=(
+            'Vectorized environment backend. Auto selects DummyVecEnv '
+            'for one robot and SubprocVecEnv for multiple robots.'
+        ),
+    )
+    parser.add_argument(
+        '--rollout-steps',
+        type=int,
+        help=(
+            'PPO rollout steps per environment. Allows equal total '
+            'rollout batch sizes across different robot counts.'
+        ),
+    )
+    parser.add_argument(
+        '--subproc-start-method',
+        choices=('forkserver', 'spawn', 'fork'),
+        default='forkserver',
+        help=(
+            'Multiprocessing start method used by SubprocVecEnv. '
+            'Default: forkserver.'
+        ),
+    )
     parser.add_argument('--eval-frequency', type=int)
     parser.add_argument('--checkpoint-frequency', type=int)
     parser.add_argument('--evaluation-episodes', type=int)
@@ -263,6 +312,24 @@ def main() -> None:
         'total_timesteps',
     )
     n_envs = _positive(int(args.n_envs or training['n_envs']), 'n_envs')
+    vectorized_backend = _resolve_vectorized_backend(
+        args.vec_env,
+        n_envs,
+    )
+    rollout_steps = _positive(
+        int(args.rollout_steps or ppo_config['n_steps']),
+        'rollout_steps',
+    )
+    rollout_batch_size = rollout_steps * n_envs
+    minibatch_size = int(ppo_config['batch_size'])
+
+    if rollout_batch_size < minibatch_size:
+        raise ValueError(
+            'Combined rollout batch must not be smaller than the '
+            f'PPO minibatch size: rollout={rollout_batch_size}, '
+            f'minibatch={minibatch_size}'
+        )
+
     seed = int(training['seed'] if args.seed is None else args.seed)
     evaluation_frequency = _positive(
         int(args.eval_frequency or training['evaluation_frequency']),
@@ -292,7 +359,7 @@ def main() -> None:
             tensorboard_directory):
         directory.mkdir(parents=True, exist_ok=True)
 
-    train_environment = DummyVecEnv([
+    environment_factories = [
         make_environment(
             config,
             split='train',
@@ -300,7 +367,30 @@ def main() -> None:
             rank=rank,
         )
         for rank in range(n_envs)
-    ])
+    ]
+
+    if vectorized_backend == 'subproc':
+        train_environment = SubprocVecEnv(
+            environment_factories,
+            start_method=args.subproc_start_method,
+        )
+        worker_process_ids = [
+            int(process.pid)
+            for process in train_environment.processes
+        ]
+    else:
+        train_environment = DummyVecEnv(environment_factories)
+        worker_process_ids = []
+
+    print(
+        f'vectorized_environment={vectorized_backend} '
+        f'robot_count={n_envs} '
+        f'rollout_steps_per_robot={rollout_steps} '
+        f'combined_rollout_batch={rollout_batch_size} '
+        f'worker_process_ids={worker_process_ids}',
+        flush=True,
+    )
+
     validation_environment = DummyVecEnv([
         make_environment(
             config,
@@ -335,7 +425,7 @@ def main() -> None:
         'MlpPolicy',
         train_environment,
         learning_rate=float(ppo_config['learning_rate']),
-        n_steps=int(ppo_config['n_steps']),
+        n_steps=rollout_steps,
         batch_size=int(ppo_config['batch_size']),
         n_epochs=int(ppo_config['n_epochs']),
         gamma=float(ppo_config['gamma']),
@@ -423,6 +513,15 @@ def main() -> None:
         'resolved_training': {
             'total_timesteps': total_timesteps,
             'n_envs': n_envs,
+            'vectorized_environment': vectorized_backend,
+            'subproc_start_method': (
+                args.subproc_start_method
+                if vectorized_backend == 'subproc'
+                else None
+            ),
+            'rollout_steps_per_environment': rollout_steps,
+            'combined_rollout_batch_size': rollout_batch_size,
+            'worker_process_ids': worker_process_ids,
             'seed': seed,
             'evaluation_frequency': evaluation_frequency,
             'checkpoint_frequency': checkpoint_frequency,
