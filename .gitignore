@@ -43,3 +43,5 @@ src/leo_pybullet/leo_stage1_map_tools.zip
 
 # Temporary generated maps
 src/leo_pybullet/worlds/generated_*
+leo_pure_ppo_obstacle_fix_inputs.tar.gz
+
