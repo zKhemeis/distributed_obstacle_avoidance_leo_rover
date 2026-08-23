@@ -1,0 +1,11 @@
+split,world_file,seed,difficulty,scenario,random_obstacle_count,direct_path_blocked,astar_path_length_m,path_stretch_ratio,start_x,start_y,start_yaw,goal_x,goal_y
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9201.yaml,9201,hard,double_block,14,True,9.5839,1.5557,2.15837,2.110884,-1.926833,-0.092695,-3.62343
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9202.yaml,9202,hard,double_block,14,True,9.4637,1.3176,3.805483,-3.366522,2.165307,0.18196,2.835135
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9203.yaml,9203,hard,double_block,14,True,9.4912,1.5226,1.148767,1.55786,-2.145958,-1.739369,-3.966039
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9204.yaml,9204,hard,double_block,14,True,11.2763,1.3351,-2.882546,-3.367844,0.836592,3.533131,2.125006
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9205.yaml,9205,hard,double_block,14,True,11.3118,1.3589,-0.186311,-3.795879,1.935437,-3.749155,3.727344
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9206.yaml,9206,hard,double_block,14,True,11.8661,1.6315,-3.109735,2.227582,0.079526,4.136078,2.858143
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9207.yaml,9207,hard,double_block,14,True,10.1553,1.3698,-1.736452,4.178176,-0.581409,4.082935,-0.415037
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9208.yaml,9208,hard,double_block,14,True,9.3576,1.4813,-3.101613,-3.428117,0.336952,2.614818,-0.739131
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9209.yaml,9209,hard,double_block,14,True,10.1506,1.4382,4.094781,-1.376454,2.339899,-1.296536,3.178777
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_very_hard_batch/world_hard_double_block_seed_9210.yaml,9210,hard,double_block,14,True,10.1747,1.5678,-4.201776,1.114202,-0.918248,-0.00433,-3.835238
