@@ -1,0 +1,163 @@
+arena:
+  x_min: -5.0
+  x_max: 5.0
+  y_min: -5.0
+  y_max: 5.0
+  boundary_margin: 0.1
+boundary_walls:
+  enabled: true
+  thickness: 0.12
+  height: 0.45
+start:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+  exclusion_radius: 0.65
+goal:
+  x: 3.0
+  y: 0.0
+  exclusion_radius: 0.6
+start_goal_randomization:
+  enabled: true
+  minimum_distance: 4.5
+  maximum_distance: 9.0
+  boundary_clearance: 0.75
+  start_yaw_mode: face_goal
+  start_yaw_jitter_deg: 8.0
+  max_sampling_attempts: 3000
+robot:
+  length: 0.47
+  width: 0.48
+  safety_margin: 0.08
+planner:
+  resolution: 0.08
+  allow_diagonal: true
+generation:
+  inter_obstacle_gap: 0.12
+  max_placement_attempts: 5000
+  max_world_attempts: 1200
+curriculum:
+  enabled: true
+  scenario_cycle:
+  - double_block
+  - double_block
+  - direct_block
+  - clear
+difficulties:
+  easy:
+    obstacle_count:
+    - 14
+    - 16
+    size_x:
+    - 0.3
+    - 0.6
+    size_y:
+    - 0.3
+    - 0.6
+    size_z:
+    - 0.3
+    - 0.7
+    direct_block_probability: 0.0
+    structured_blocker_size_x:
+    - 0.8
+    - 1.0
+    structured_blocker_size_y:
+    - 0.8
+    - 1.0
+    structured_blocker_fraction:
+    - 0.3
+    - 0.5
+    structured_blocker_offset: 0.03
+    double_blocker_size_x:
+    - 0.7
+    - 0.9
+    double_blocker_size_y:
+    - 0.7
+    - 0.9
+    double_blocker_fractions:
+    - - 0.24
+      - 0.36
+    - - 0.62
+      - 0.74
+    double_blocker_offset:
+    - 0.12
+    - 0.24
+    minimum_path_stretch: 1.08
+  medium:
+    obstacle_count:
+    - 16
+    - 18
+    size_x:
+    - 0.3
+    - 0.7
+    size_y:
+    - 0.3
+    - 0.7
+    size_z:
+    - 0.3
+    - 0.8
+    direct_block_probability: 0.0
+    structured_blocker_size_x:
+    - 0.95
+    - 1.2
+    structured_blocker_size_y:
+    - 0.95
+    - 1.2
+    structured_blocker_fraction:
+    - 0.28
+    - 0.52
+    structured_blocker_offset: 0.03
+    double_blocker_size_x:
+    - 0.85
+    - 1.1
+    double_blocker_size_y:
+    - 0.85
+    - 1.1
+    double_blocker_fractions:
+    - - 0.23
+      - 0.37
+    - - 0.61
+      - 0.76
+    double_blocker_offset:
+    - 0.16
+    - 0.3
+    minimum_path_stretch: 1.12
+  hard:
+    obstacle_count:
+    - 18
+    - 20
+    size_x:
+    - 0.35
+    - 0.8
+    size_y:
+    - 0.35
+    - 0.8
+    size_z:
+    - 0.35
+    - 0.9
+    direct_block_probability: 0.0
+    structured_blocker_size_x:
+    - 1.05
+    - 1.35
+    structured_blocker_size_y:
+    - 1.05
+    - 1.35
+    structured_blocker_fraction:
+    - 0.27
+    - 0.53
+    structured_blocker_offset: 0.02
+    double_blocker_size_x:
+    - 1.0
+    - 1.25
+    double_blocker_size_y:
+    - 1.0
+    - 1.25
+    double_blocker_fractions:
+    - - 0.22
+      - 0.38
+    - - 0.6
+      - 0.77
+    double_blocker_offset:
+    - 0.2
+    - 0.36
+    minimum_path_stretch: 1.16
