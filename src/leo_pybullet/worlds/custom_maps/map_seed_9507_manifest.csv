@@ -1,0 +1,2 @@
+split,world_file,seed,difficulty,scenario,structured_blocker_count,random_obstacle_count,boundary_wall_count,total_box_count,direct_path_blocked,straight_distance_m,astar_path_length_m,path_stretch_ratio,start_x,start_y,start_yaw,goal_x,goal_y
+validation,/root/leo_ws/src/leo_pybullet/worlds/custom_maps/map_seed_9507.yaml,9507,hard,direct_block,1,10,4,14,True,8.4853,9.938,1.1712,-3.0,-3.0,0.785,3.0,3.0
