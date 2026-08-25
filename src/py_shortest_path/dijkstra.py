@@ -4,12 +4,14 @@ from scipy.sparse.csgraph import shortest_path
 from scipy.sparse import dok_array, coo_array
 from enum import Enum
 import matplotlib.pyplot as plt
+import os.path
+import yaml
 
 
 def pos2idx(x: int, y:int, width: int, height: int) -> int:
     return x + y*width if 0 <= x < width and 0 <= y < height else -1
 
-def idx2pos(idx: int, width: int, height: int) -> (int, int):
+def idx2pos(idx: int, width: int, height: int) -> tuple[int, int]:
     return (idx%width, int(idx/width)) if 0 <= idx < width*height else (-1, -1)
 
 def make_graph_coo(width: int, height: int):
@@ -174,7 +176,7 @@ def make_circle(center_x: int, center_y: int, radius: int, width: int, height: i
 
     return coo_array((data, (row_idxs, col_idxs)), shape=(size, size))
 
-def distance_point_line(point: (int, int), line_1: (int, int), line_2: (int, int)) -> (int, bool):
+def distance_point_line(point: tuple[int, int], line_1: tuple[int, int], line_2: tuple[int, int]) -> tuple[int, bool]:
     """
     Checks how far the point is from the line and which side it lies on
 
@@ -191,7 +193,7 @@ def distance_point_line(point: (int, int), line_1: (int, int), line_2: (int, int
     distance = ((y2 - y1)*xp - (x2 - x1)*yp + x2*y1 - y2*x1) / (np.sqrt((y2-y1)**2+(x2-x1)**2))  # 86s
     return distance, distance > 0
 
-def rectangle_check(point: (int, int), vertices: [(int, int)], radius: int) -> int:
+def rectangle_check(point: tuple[int, int], vertices: list[tuple[int, int]], radius: int) -> int:
     """
     Checks if the point is considered close to or even within the rectangle
     Do make sure the shape is actually approximately rectangular as the algorithms assumes right angles
@@ -259,8 +261,7 @@ def rectangle_check(point: (int, int), vertices: [(int, int)], radius: int) -> i
 
     return inside
 
-
-def make_rectangle_bounded(vertices: [(int, int)], radius: int, width: int, height: int):
+def make_rectangle_bounded(vertices: list[tuple[int, int]], radius: int, width: int, height: int):
     """
     Makes a (coo) graph at the specified position
     Includes round boundary of the robot
@@ -283,9 +284,6 @@ def make_rectangle_bounded(vertices: [(int, int)], radius: int, width: int, heig
     max_x = max([p[0] for p in vertices]) + 1 + radius
     min_y = min([p[1] for p in vertices]) - 1 - radius
     max_y = max([p[1] for p in vertices]) + 1 + radius
-
-    if not (0 <= min_x and max_x < width and 0 <= min_y and max_y < height):
-        return None
 
     for y in range(min_y, max_y):
         for x in range(min_x, max_x):
@@ -325,8 +323,14 @@ def make_rectangle_bounded(vertices: [(int, int)], radius: int, width: int, heig
 
 
 
-    return coo_array((data, (row_idxs, col_idxs)), shape=(size, size))
+    if np.sum(np.array(row_idxs) > 1000000):
+        print()
+        return None
+    if np.sum(np.array(col_idxs) > 1000000):
+        print()
+        return None
 
+    return coo_array((data, (row_idxs, col_idxs)), shape=(size, size))
 
 def display_dist(data: np.ndarray, width: int, height: int):
     if data.shape[0] != 1 and data.shape[1] != width*height:
@@ -339,38 +343,97 @@ def display_dist(data: np.ndarray, width: int, height: int):
     ax.imshow(image, vmin=0, vmax=2*np.sqrt(height**2+width**2))
     plt.show()
 
+def import_yaml_world(path: str, is_lab: bool):
+    """
+    :param path: Path to the world file
+    :param is_lab: Is the world 3x2m as in the lab or is it 10x10m?
+    """
+    ROVER_SIZE = 0.2
+
+    if not os.path.isfile(path) or not path.endswith(".yaml"):
+        return None
+
+    if is_lab:
+        width = 300
+        height = 200
+        scale = 100  # 100cm in 1m
+
+        x_offset = 1.5
+        y_offset = 1.
+    else:
+        width = 1000
+        height = 1000
+        scale = 100  # 100cm in 1m
+
+        x_offset = 5.
+        y_offset = 5.
+
+    map = make_graph_coo(width, height)
+    with open(path, "r") as f:
+        content = yaml.load(f, Loader=yaml.SafeLoader)
+        if "obstacles" not in content:
+            return None
+
+        obstacles = content["obstacles"]
+
+        for obstacle in obstacles:
+            if not (obstacle["name"].startswith("box")):  # or obstacle["name"].startswith("boundary")):
+                continue
+
+            x = scale * (obstacle["x"] + x_offset)
+            y = scale * (obstacle["y"] + y_offset)
+            size_x = scale * obstacle["size_x"]
+            size_y = scale * obstacle["size_y"]
+
+            v0 = (int(x - size_x/2), int(y + size_y/2))
+            v1 = (int(x - size_x/2), int(y - size_y/2))
+            v2 = (int(x + size_x/2), int(y - size_y/2))
+            v3 = (int(x + size_x/2), int(y + size_y/2))
+
+            vertices = [v0, v1, v2, v3]
+            print(f"Making obstacle {obstacle["name"]}: {vertices}")
+            rect = make_rectangle_bounded(vertices, int(scale*ROVER_SIZE), width, height)
+            if rect is not None:
+                map += rect
+
+    return map
 
 if __name__ == "__main__":
-    width = 2000  # mm
-    height = 3000  # mm
+    width = 1000  # cm
+    height = 1000  # cm
+
+    before_import = time.time()
+    array = import_yaml_world("/home/opc/CLionProjects/rover/distributed_obstacle_avoidance_leo_rover/src/py_shortest_path/world_hard_double_block_seed_9101.yaml", False)
+    after_import = time.time()
+    print(f"Import: {after_import - before_import}")
 
     before_graph = time.time()
-    array = make_graph_coo(width, height)
+    # array = make_graph_coo(width, height)
     after_graph = time.time()
     print(f"Graph: {after_graph - before_graph}, {array.size}")
 
     before_circle = time.time()
-    circle = make_circle(1000, 1500, 300, width, height)
+    #circle = make_circle(1000, 1500, 300, width, height)
     after_circle = time.time()
-    print(f"Circle: {after_circle - before_circle}, {circle.size}")
+    #print(f"Circle: {after_circle - before_circle}, {circle.size}")
 
     before_rectangle = time.time()
     #rectangle = make_rectangle_bounded([(1000, 1500), (1000, 1000), (1500, 1000), (1500, 1500)], 200, width, height)
     #rectangle = make_rectangle_bounded([(1000, 1500), (800, 1100), (1000, 700), (1200, 1100)], 200, width, height)
-    rectangle = make_rectangle_bounded([(1000, 1500), (700, 1000), (1000, 700), (1300, 1000)], 200, width, height)
+    #rectangle = make_rectangle_bounded([(1000, 1500), (700, 1000), (1000, 700), (1300, 1000)], 200, width, height)
     after_rectangle = time.time()
-    print(f"Rectangle: {after_rectangle - before_rectangle}, {"rectangle.size"}")
+    #print(f"Rectangle: {after_rectangle - before_rectangle}, {"rectangle.size"}")
 
     before_add = time.time()
-    array += rectangle
+    #array += rectangle
     #array += circle
     after_add = time.time()
-    print(f"Addition: {after_add - before_add}, {array.size}")
+    #print(f"Addition: {after_add - before_add}, {array.size}")
 
     before_dist = time.time()
-    dist = shortest_path(csgraph=array, method='D', directed=False, indices=[pos2idx(width-1, height-1, width, height)])
+    dist = shortest_path(csgraph=array, method='D', directed=False, indices=[pos2idx(900, 900, width, height)])
     after_dist = time.time()
-    print(f"Dist: {after_dist - before_dist}")
+    #print(f"Dist: {after_dist - before_dist}")
     # print(np.round(dist.reshape((height, width)), 2))
 
     display_dist(dist, width, height)
