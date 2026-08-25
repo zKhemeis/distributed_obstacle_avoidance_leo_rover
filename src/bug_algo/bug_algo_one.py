@@ -2,7 +2,7 @@
 
 import math
 import numpy as np
-from gymnasium import spaces
+# from gymnasium import spaces
 
 import rclpy
 from rclpy.node import Node
@@ -10,7 +10,7 @@ from rclpy.qos import qos_profile_sensor_data
 
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
-from leo_msgs.msg import WheelOdom
+# from leo_msgs.msg import WheelOdom
 from geometry_msgs.msg import Twist
 
 from enum import Enum
@@ -22,7 +22,8 @@ class EState(Enum):
     STOPPED = 0,
     REACHED = 1,
     CHASE_GOAL = 2,
-    AVOIDING_OBSTACLE = 3
+    TURNING_TOWARDS_GOAL = 3,
+    AVOIDING_OBSTACLE = 4,
 
 class EObstacleState(Enum):
     ROTATE = 0,
@@ -48,7 +49,7 @@ if not hasattr(np, "_core"):
             pass
 
 # --- constants that MUST match training (see leo_rover_env.py) ---------------
-N_BEAMS = 3200
+N_BEAMS = 500  # 3200
 # Resampled-beam indices for alignment checks. beam_rel = linspace(-pi, pi, N,
 # endpoint=False), so 0 rad (robot forward) is at N/2, +pi/2 (left) at 3N/4,
 # -pi/2 (right) at N/4.
@@ -86,7 +87,7 @@ class BugDeploy(Node):
         super().__init__("leo_deploy")
 
         # --- parameters ---
-        self.declare_parameter("goal_x", 2.0)
+        self.declare_parameter("goal_x", 7.0)
         self.declare_parameter("goal_y", 0.0)
         self.declare_parameter("model_path", "leo_ppo")
         # Mounting yaw of the lidar frame relative to base_link (rad). If the
@@ -96,7 +97,7 @@ class BugDeploy(Node):
         # this rover, e.g.
         #   -p odom_topic:=/merged_odom -p cmd_vel_topic:=/rob_1/cmd_vel
         self.declare_parameter("scan_topic", "/scan")
-        self.declare_parameter("odom_topic", "/firmware/wheel_odom")
+        self.declare_parameter("odom_topic", "/odom")
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         # When true, log the resampled forward/left/right beams each step so you
 	        # can verify lidar_yaw_offset and spin handedness before driving.
@@ -127,10 +128,11 @@ class BugDeploy(Node):
         )
         self.cmd_pub = self.create_publisher(Twist, cmd_vel_topic, 10)
         self.create_subscription(LaserScan, scan_topic, self._on_scan, qos_profile_sensor_data)
-        self.create_subscription(WheelOdom, odom_topic, self._on_odom, qos_profile_sensor_data)
+        self.create_subscription(Odometry, odom_topic, self._on_odom, qos_profile_sensor_data)
+        # self.create_subscription(WheelOdom, odom_topic, self._on_odom, qos_profile_sensor_data)
         self.create_timer(1.0 / CONTROL_HZ, self._control_step)
 
-        self.state = EState.CHASE_GOAL
+        self.state = EState.TURNING_TOWARDS_GOAL
         self.obstacle_state = EObstacleState.ROTATE
 
     # ---------------------------------------------------------------- sensors
@@ -143,10 +145,10 @@ class BugDeploy(Node):
 
         # Map each target (robot-frame) angle to the nearest real beam index.
         # base_angle = lidar_angle + offset  =>  lidar_angle = base_angle - offset
-        lidar_ang = self._beam_rel - self.lidar_yaw_offset
-        idx = np.round((lidar_ang - msg.angle_min) / msg.angle_increment).astype(int)
-        idx = np.mod(idx, n)                       # wrap around the full scan
-        ranges = raw[idx]
+        #lidar_ang = self._beam_rel - self.lidar_yaw_offset
+        #idx = np.round((lidar_ang - msg.angle_min) / msg.angle_increment).astype(int)
+        #idx = np.mod(idx, n)                       # wrap around the full scan
+        ranges = raw
 
         # Classify returns. CRITICAL: a reading below range_min is NOT free space
         # -- it is a real obstacle closer than the sensor's spec'd minimum (the
@@ -168,20 +170,22 @@ class BugDeploy(Node):
 
         ranges = np.clip(ranges, 0.0, LIDAR_MAX_RANGE)
 
+        #self.get_logger().info(f"{np.min(raw), np.min(ranges), ranges[0], raw[0]}")
+        #self.get_logger().info(f"{len(ranges), len(raw)}")
         self._scan = ranges
         self._scan_stamp = self.get_clock().now()
 
     def _on_odom(self, msg: Odometry):
-        self.get_logger().info(f"{msg}")
+        # self.get_logger().info(f"{msg}")
 
         if isinstance(msg, Odometry):
             p = msg.pose.pose.position
             yaw = yaw_from_quat(msg.pose.pose.orientation)
             self._pose = (p.x, p.y, yaw)
             self._pose_stamp = self.get_clock().now()
-        elif isinstance(msg, WheelOdom):
-            self._pose = (msg.pose_x, msg.pose_y, msg.pose_yaw)
-            self._pose_stamp = self.get_clock().now()
+        # elif isinstance(msg, WheelOdom):
+        #     self._pose = (msg.pose_x, msg.pose_y, msg.pose_yaw)
+        #     self._pose_stamp = self.get_clock().now()
         else:
             self.get_logger().warn(f"Incorrect msg type in _on_odom: {type(msg)}")
 
@@ -243,7 +247,7 @@ class BugDeploy(Node):
         # Hard safety stop: real obstacle inside the footprint + margin.
         if float(self._scan.min()) < ROBOT_RADIUS + SAFETY_MARGIN:
             min_idx = np.argmin(self._scan)
-            self._stop(f"obstacle within safety margin: {min_idx} of {len(self._scan)} ranges")
+            self._stop(f"obstacle within safety margin: {min_idx} of {len(self._scan)} ranges, {self._scan[min_idx]}")
             return
 
         obs, dist = self._build_obs()
@@ -266,12 +270,12 @@ class BugDeploy(Node):
             self.get_logger().info(f"goal reached (dist={dist:.2f} m)")
             return
 
-        if self.state == EState.CHASE_GOAL and self._scan[FWD_BEAM] < ROBOT_RADIUS + 2*SAFETY_MARGIN:
+        if self.state == EState.CHASE_GOAL and self._scan[FWD_BEAM] < ROBOT_RADIUS + 3*SAFETY_MARGIN:
             # There's an obstacle in the way. Bug around it
             self.get_logger().info(f"Change of state: Now avoiding obstacle")
             self.state = EState.AVOIDING_OBSTACLE
             self.obstacle_state = EObstacleState.ROTATE
-        elif self.state == EState.AVOIDING_OBSTACLE and self._scan[FWD_BEAM] > ROBOT_RADIUS + 2*SAFETY_MARGIN and angle_diff < 0.1*np.pi:
+        elif self.state == EState.AVOIDING_OBSTACLE and self._scan[FWD_BEAM] > ROBOT_RADIUS + 3*SAFETY_MARGIN and angle_diff < 0.1*np.pi:
             # The path forward is clear and we're pointing towards the goal. Get going
             self.get_logger().info(f"Change of state: Now driving towards goal")
             self.state = EState.CHASE_GOAL
@@ -279,31 +283,33 @@ class BugDeploy(Node):
         # Action time
         cmd = Twist()
 
-        if self.state == EState.CHASE_GOAL:
-            # Go as fast as possible and rotate towards goal
+        if self.state == EState.TURNING_TOWARDS_GOAL:
+            # Do exactly what it says on the tin
+            cmd.linear.x = 0.
+
+            # Figure out direction to turn in
+            d = (xt - x1)*(y2 - y1) - (yt - y1)*(x2 - x1)  # < 0 implies the target position is 'to the left'
+            cmd.angular.z = -W_MAX * np.sign(d)  # 'Negative' rotation is 'to the left' (counterclockwise)
+
+            if cosine_distance >= 0.99:
+               self.state = EState.CHASE_GOAL
+
+        elif self.state == EState.CHASE_GOAL:
+            # Go as fast as possible towards goal
             cmd.linear.x = V_MAX
+            cmd.angular.z = 0.
 
-            # Determine direction and angular velocity
-            d = (xt - x1)*(y2-y1)-(yt-y1)*(x2-x1)
-            left_reference = ((x1 - 1) - x1)*(y2-y1)-(yt-y1)*(x2-x1)  # Guaranteed to be 'to the left'
-            left_right = np.sign(d) * np.sign(left_reference)  # 1 == should turn left, -1 == should turn right
+            if cosine_distance < 0.95:
+                self.state = EState.TURNING_TOWARDS_GOAL
 
-            vec1 = np.array((xt - x1, yt - y1))
-            vec1 = vec1 / np.linalg.norm(vec1)
-            vec2 = np.array((x2, y2))
-            vec2 = vec2 / np.linalg.norm(vec2)
-            cosine_distance = np.dot(vec1, vec2)
-
-            cmd.angular.z = left_right * cosine_distance * W_MAX
-
-        if self.state == EState.AVOIDING_OBSTACLE:
+        elif self.state == EState.AVOIDING_OBSTACLE:
             # Substate transitions
-            distance_to_wall = self._scan[RIGHT_BEAM] - (ROBOT_RADIUS + 2 * SAFETY_MARGIN)
+            distance_to_wall = self._scan[RIGHT_BEAM] - (ROBOT_RADIUS + 3 * SAFETY_MARGIN)
             if self.obstacle_state == EObstacleState.ROTATE and np.abs(distance_to_wall) < SAFETY_MARGIN:
                 # Follow the wall to the right if it's close enough
                 self.get_logger().info(f"Change of substate: Following obstacle")
                 self.obstacle_state = EObstacleState.FOLLOW
-            if self._scan[FWD_BEAM] < ROBOT_RADIUS + 2*SAFETY_MARGIN:
+            if self._scan[FWD_BEAM] < ROBOT_RADIUS + 3*SAFETY_MARGIN:
                 # Make sure there's enough space ahead
                 self.obstacle_state = EObstacleState.ROTATE
                 self.get_logger().info(f"Change of substate: Rotating until obstacle is to the right")
@@ -312,7 +318,7 @@ class BugDeploy(Node):
             # Substate actions
             if self.obstacle_state == EObstacleState.ROTATE:
                 # Just rotate
-                cmd.linear.x = 0
+                cmd.linear.x = 0.
                 cmd.angular.z = W_MAX
             elif self.obstacle_state == EObstacleState.FOLLOW:
                 # Go forward slowly, but rotate to make sure the wall to the right is roughly the distance at all times
@@ -321,7 +327,8 @@ class BugDeploy(Node):
                 rotation_factor = distance_to_wall / SAFETY_MARGIN  # Negative == Too close. Positive == Too far away
                 cmd.angular.z = -1 * 0.2 * rotation_factor * W_MAX
 
-        self.get_logger().info(f"Publishing Twist command with linear: {cmd.linear.x}, angular: {cmd.angular.z}")
+        # self.get_logger().info(f"")
+        # self.get_logger().info(f"Publishing Twist command with linear: {cmd.linear.x}, angular: {cmd.angular.z}, state: {self.state, self.obstacle_state}")
         self.cmd_pub.publish(cmd)
 
 
