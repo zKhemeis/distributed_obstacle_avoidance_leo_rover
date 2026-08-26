@@ -6,6 +6,8 @@ from enum import Enum
 import matplotlib.pyplot as plt
 import os.path
 import yaml
+import argparse
+import imageio
 
 
 def pos2idx(x: int, y:int, width: int, height: int) -> int:
@@ -332,7 +334,7 @@ def make_rectangle_bounded(vertices: list[tuple[int, int]], radius: int, width: 
 
     return coo_array((data, (row_idxs, col_idxs)), shape=(size, size))
 
-def display_dist(data: np.ndarray, width: int, height: int):
+def display_dist(data: np.ndarray, width: int, height: int, image_path: str = ""):
     if data.shape[0] != 1 and data.shape[1] != width*height:
         print("Wrong shape")
         return
@@ -340,16 +342,20 @@ def display_dist(data: np.ndarray, width: int, height: int):
     fig, ax = plt.subplots(figsize=(20, 30))
 
     image = data.reshape((height, width))
-    ax.imshow(image, vmin=0, vmax=2*np.sqrt(height**2+width**2))
-    plt.show()
 
-def import_yaml_world(path: str, is_lab: bool):
+    if image_path is None or image_path == "":
+        ax.imshow(image, vmin=0, vmax=2*np.sqrt(height**2+width**2))
+        plt.show()
+    else:
+        # imageio.imsave(image_path, image)
+        plt.imsave(image_path, image, vmin=0, vmax=2*np.sqrt(height**2+width**2))
+
+
+def import_yaml_world(path: str, is_lab: bool, radius: int):
     """
     :param path: Path to the world file
     :param is_lab: Is the world 3x2m as in the lab or is it 10x10m?
     """
-    ROVER_SIZE = 0.2
-
     if not os.path.isfile(path) or not path.endswith(".yaml"):
         return None
 
@@ -392,18 +398,19 @@ def import_yaml_world(path: str, is_lab: bool):
 
             vertices = [v0, v1, v2, v3]
             print(f"Making obstacle {obstacle["name"]}: {vertices}")
-            rect = make_rectangle_bounded(vertices, int(scale*ROVER_SIZE), width, height)
+            rect = make_rectangle_bounded(vertices, radius, width, height)
             if rect is not None:
                 map += rect
 
     return map
 
-if __name__ == "__main__":
+
+def test():
     width = 1000  # cm
     height = 1000  # cm
 
     before_import = time.time()
-    array = import_yaml_world("/home/opc/CLionProjects/rover/distributed_obstacle_avoidance_leo_rover/src/py_shortest_path/world_hard_double_block_seed_9101.yaml", False)
+    array = import_yaml_world("/home/opc/CLionProjects/rover/distributed_obstacle_avoidance_leo_rover/src/leo_pybullet/worlds/world_hard_double_block_seed_9101.yaml", False, 20)
     after_import = time.time()
     print(f"Import: {after_import - before_import}")
 
@@ -433,7 +440,45 @@ if __name__ == "__main__":
     before_dist = time.time()
     dist = shortest_path(csgraph=array, method='D', directed=False, indices=[pos2idx(900, 900, width, height)])
     after_dist = time.time()
-    #print(f"Dist: {after_dist - before_dist}")
+    print(f"Dist: {after_dist - before_dist}")
     # print(np.round(dist.reshape((height, width)), 2))
 
     display_dist(dist, width, height)
+
+
+def find_shortest_path(world_path: str, width: int, height: int, radius: int, image_path: str = ""):
+    is_lab = width == 200 and height == 300
+    world = import_yaml_world(world_path, is_lab, radius)
+
+    dist = shortest_path(csgraph=world, method='D', directed=False, indices=[pos2idx(900, 900, width, height)])
+
+    if image_path:
+        display_dist(dist, width, height, image_path)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--world", help="Path to the world file")
+parser.add_argument("--width", help="Width of the world")
+parser.add_argument("--height", help="Height of the world")
+parser.add_argument("--radius", help="Radius of the robot")
+parser.add_argument("--image", help="Path to the image", default=None)
+parser.add_argument("--test", help="Trigger test function", action="store_true")
+
+if __name__ == "__main__":
+    args = parser.parse_args()
+
+    if args.test or args.world is None:
+        test()
+    else:
+        assert args.world is not None
+        assert args.width is not None
+        assert args.height is not None
+        assert args.radius is not None
+
+        world_path = args.world
+        width = int(args.width)
+        height = int(args.height)
+        radius = int(args.radius)
+        image_path = args.image
+
+        find_shortest_path(world_path, width, height, radius, image_path)
