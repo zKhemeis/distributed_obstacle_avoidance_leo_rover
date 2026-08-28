@@ -87,8 +87,8 @@ class BugDeploy(Node):
         super().__init__("leo_deploy")
 
         # --- parameters ---
-        self.declare_parameter("goal_x", 7.0)
-        self.declare_parameter("goal_y", 0.0)
+        self.declare_parameter("goal_x", 4.0)
+        self.declare_parameter("goal_y", 4.0)
         self.declare_parameter("model_path", "leo_ppo")
         # Mounting yaw of the lidar frame relative to base_link (rad). If the
         # lidar's 0 deg does not point straight forward, set this. CCW positive.
@@ -118,6 +118,8 @@ class BugDeploy(Node):
         self._scan_stamp = None
         self._pose = None          # (x, y, yaw)
         self._pose_stamp = None
+        self._previous_pose = None
+        self._travelled_distance = 0
 
         # --- ROS plumbing ---
         scan_topic = self.get_parameter("scan_topic").value
@@ -175,14 +177,32 @@ class BugDeploy(Node):
         self._scan = ranges
         self._scan_stamp = self.get_clock().now()
 
+
+        # Compute closest distance of front angles
+        front_angle_rad = 30 * np.pi / 180
+        min_distance = np.inf
+        for i in range(len(ranges)):
+            angle = msg.angle_min + i * msg.angle_increment
+            if np.abs(wrap(angle)) <= front_angle_rad:
+                dist = ranges[i]
+                min_distance = min(min_distance, dist)
+
+        self._min_front_distance = min_distance
+
+
     def _on_odom(self, msg: Odometry):
         # self.get_logger().info(f"{msg}")
 
         if isinstance(msg, Odometry):
+            self._previous_pose = self._pose
             p = msg.pose.pose.position
             yaw = yaw_from_quat(msg.pose.pose.orientation)
             self._pose = (p.x, p.y, yaw)
             self._pose_stamp = self.get_clock().now()
+
+            if self._pose is not None and self._previous_pose is not None:
+                dist = np.sqrt((p.x - self._previous_pose[0])**2 + (p.y - self._previous_pose[1])**2)
+                self._travelled_distance += dist
         # elif isinstance(msg, WheelOdom):
         #     self._pose = (msg.pose_x, msg.pose_y, msg.pose_yaw)
         #     self._pose_stamp = self.get_clock().now()
@@ -267,15 +287,15 @@ class BugDeploy(Node):
             # If we're close, stop
             self.state = EState.REACHED
             self._stop()
-            self.get_logger().info(f"goal reached (dist={dist:.2f} m)")
+            self.get_logger().info(f"goal reached (dist={dist:.2f} m). Final distance travelled: {self._travelled_distance}")
             return
 
-        if self.state == EState.CHASE_GOAL and self._scan[FWD_BEAM] < ROBOT_RADIUS + 3*SAFETY_MARGIN:
+        if self.state == EState.CHASE_GOAL and self._min_front_distance < ROBOT_RADIUS + 3*SAFETY_MARGIN:
             # There's an obstacle in the way. Bug around it
             self.get_logger().info(f"Change of state: Now avoiding obstacle")
             self.state = EState.AVOIDING_OBSTACLE
             self.obstacle_state = EObstacleState.ROTATE
-        elif self.state == EState.AVOIDING_OBSTACLE and self._scan[FWD_BEAM] > ROBOT_RADIUS + 3*SAFETY_MARGIN and angle_diff < 0.1*np.pi:
+        elif self.state == EState.AVOIDING_OBSTACLE and self._min_front_distance > ROBOT_RADIUS + 3*SAFETY_MARGIN and angle_diff < 0.1*np.pi:
             # The path forward is clear and we're pointing towards the goal. Get going
             self.get_logger().info(f"Change of state: Now driving towards goal")
             self.state = EState.CHASE_GOAL
@@ -309,7 +329,7 @@ class BugDeploy(Node):
                 # Follow the wall to the right if it's close enough
                 self.get_logger().info(f"Change of substate: Following obstacle")
                 self.obstacle_state = EObstacleState.FOLLOW
-            if self._scan[FWD_BEAM] < ROBOT_RADIUS + 3*SAFETY_MARGIN:
+            if self._min_front_distance < ROBOT_RADIUS + 1.2*SAFETY_MARGIN:
                 # Make sure there's enough space ahead
                 self.obstacle_state = EObstacleState.ROTATE
                 self.get_logger().info(f"Change of substate: Rotating until obstacle is to the right")
@@ -322,10 +342,10 @@ class BugDeploy(Node):
                 cmd.angular.z = W_MAX
             elif self.obstacle_state == EObstacleState.FOLLOW:
                 # Go forward slowly, but rotate to make sure the wall to the right is roughly the distance at all times
-                cmd.linear.x = 0.1 * V_MAX
+                cmd.linear.x = 0.2 * V_MAX
 
                 rotation_factor = distance_to_wall / SAFETY_MARGIN  # Negative == Too close. Positive == Too far away
-                cmd.angular.z = -1 * 0.2 * rotation_factor * W_MAX
+                cmd.angular.z = -1 * 0.3 * rotation_factor * W_MAX
 
         # self.get_logger().info(f"")
         # self.get_logger().info(f"Publishing Twist command with linear: {cmd.linear.x}, angular: {cmd.angular.z}, state: {self.state, self.obstacle_state}")
