@@ -22,11 +22,11 @@ class EState(Enum):
     STOPPED = 0,
     REACHED = 1,
     CHASE_GOAL = 2,
-    TURNING_TOWARDS_GOAL = 3,
+    FACE_TOWARDS_GOAL = 3,
     AVOIDING_OBSTACLE = 4,
 
 class EObstacleState(Enum):
-    ROTATE = 0,
+    TURN = 0,
     FOLLOW = 1
 
 
@@ -134,8 +134,8 @@ class BugDeploy(Node):
         # self.create_subscription(WheelOdom, odom_topic, self._on_odom, qos_profile_sensor_data)
         self.create_timer(1.0 / CONTROL_HZ, self._control_step)
 
-        self.state = EState.TURNING_TOWARDS_GOAL
-        self.obstacle_state = EObstacleState.ROTATE
+        self.state = EState.FACE_TOWARDS_GOAL
+        self.obstacle_state = EObstacleState.TURN
 
     # ---------------------------------------------------------------- sensors
     def _on_scan(self, msg: LaserScan):
@@ -294,7 +294,7 @@ class BugDeploy(Node):
             # There's an obstacle in the way. Bug around it
             self.get_logger().info(f"Change of state: Now avoiding obstacle")
             self.state = EState.AVOIDING_OBSTACLE
-            self.obstacle_state = EObstacleState.ROTATE
+            self.obstacle_state = EObstacleState.TURN
         elif self.state == EState.AVOIDING_OBSTACLE and self._min_front_distance > ROBOT_RADIUS + 3*SAFETY_MARGIN and angle_diff < 0.1*np.pi:
             # The path forward is clear and we're pointing towards the goal. Get going
             self.get_logger().info(f"Change of state: Now driving towards goal")
@@ -303,7 +303,7 @@ class BugDeploy(Node):
         # Action time
         cmd = Twist()
 
-        if self.state == EState.TURNING_TOWARDS_GOAL:
+        if self.state == EState.FACE_TOWARDS_GOAL:
             # Do exactly what it says on the tin
             cmd.linear.x = 0.
 
@@ -320,23 +320,23 @@ class BugDeploy(Node):
             cmd.angular.z = 0.
 
             if cosine_distance < 0.95:
-                self.state = EState.TURNING_TOWARDS_GOAL
+                self.state = EState.FACE_TOWARDS_GOAL
 
         elif self.state == EState.AVOIDING_OBSTACLE:
             # Substate transitions
             distance_to_wall = self._scan[RIGHT_BEAM] - (ROBOT_RADIUS + 3 * SAFETY_MARGIN)
-            if self.obstacle_state == EObstacleState.ROTATE and np.abs(distance_to_wall) < SAFETY_MARGIN:
+            if self.obstacle_state == EObstacleState.TURN and np.abs(distance_to_wall) < SAFETY_MARGIN:
                 # Follow the wall to the right if it's close enough
                 self.get_logger().info(f"Change of substate: Following obstacle")
                 self.obstacle_state = EObstacleState.FOLLOW
             if self._min_front_distance < ROBOT_RADIUS + 1.2*SAFETY_MARGIN:
                 # Make sure there's enough space ahead
-                self.obstacle_state = EObstacleState.ROTATE
+                self.obstacle_state = EObstacleState.TURN
                 self.get_logger().info(f"Change of substate: Rotating until obstacle is to the right")
 
 
             # Substate actions
-            if self.obstacle_state == EObstacleState.ROTATE:
+            if self.obstacle_state == EObstacleState.TURN:
                 # Just rotate
                 cmd.linear.x = 0.
                 cmd.angular.z = W_MAX
